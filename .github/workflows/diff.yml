@@ -1,0 +1,134 @@
+name: Diff screenshots via Pull Request
+
+on:
+  workflow_call:
+    inputs:
+      snapshots_command:
+        description: e.g. npm run snapshot
+        required: true
+        type: string
+      snapshots_dirpath:
+        description: e.g. test/vrt.e2e.ts-snapshots
+        required: true
+        type: string
+      your_repo:
+        description: e.g. github.repository
+        type: string
+        default: ${{ github.repository }}
+      base_sha:
+        description: e.g. github.event.pull_request.base.sha
+        type: string
+        default: ${{ github.event.pull_request.base.sha }}
+      head_sha:
+        description: e.g github.event.pull_request.head.sha
+        type: string
+        default: ${{ github.event.pull_request.head.sha }}
+      npm_install_command:
+        description: e.g. npm ci
+        type: string
+        default: npm ci
+      # Internal variables
+      vrt_repo:
+        description: e.g. org_name/repo_name
+        type: string
+        default: namikingsoft/vrt-diff-2024
+      vrt_diff_workspace:
+        type: string
+        default: .vrt-diff-${{ github.event.pull_request.head.sha }}
+      vrt_diff_dirname:
+        type: string
+        default: diff
+      vrt_diff_base_branch:
+        type: string
+        default: ${{ github.repository }}/${{ github.event.pull_request.base.sha }}
+      vrt_diff_temp_branch:
+        type: string
+        default: diff
+    secrets:
+      your_repo_github_token:
+        required: true
+      vrt_repo_github_token:
+        required: true
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          repository: ${{ inputs.your_repo }}
+          token: ${{ secrets.your_repo_github_token }}
+      - run: |
+          echo "node_version=$(cat .node-version)" >> $GITHUB_OUTPUT
+        id: vars
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.vars.outputs.node_version }}
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          repository: ${{ inputs.vrt_repo }}
+          path: ${{ inputs.vrt_diff_workspace }}
+          token: ${{ secrets.vrt_repo_github_token }}
+      - run: |
+          cd ${{ inputs.vrt_diff_workspace }}
+          git config user.name  "GitHub Action"
+          git config user.email "action@github.com"
+          if ! git checkout ${{ inputs.vrt_diff_base_branch }}
+          then
+            git checkout -b ${{ inputs.vrt_diff_base_branch }}
+            git push origin HEAD:${{ inputs.vrt_diff_base_branch }} -f
+            echo "required_snapshots=true" >> $GITHUB_OUTPUT
+          fi
+        id: checkouts
+      - run: git checkout ${{ inputs.base_sha }}
+        if: steps.checkouts.outputs.required_snapshots
+      - run: ${{ inputs.npm_install_command}}
+        if: steps.checkouts.outputs.required_snapshots
+      - run: ${{ inputs.snapshots_command }}
+        if: steps.checkouts.outputs.required_snapshots
+      - run: cp -r ${{ inputs.snapshots_dirpath }} ${{ inputs.vrt_diff_workspace }}/${{ inputs.vrt_diff_dirname }}
+        if: steps.checkouts.outputs.required_snapshots
+      - run: |
+          cd ${{ inputs.vrt_diff_workspace }}
+          git add ${{ inputs.vrt_diff_dirname }}
+          git commit -m "Update screenshots [ci skip]"
+          git push origin HEAD:${{ inputs.vrt_diff_base_branch }} -f
+        if: steps.checkouts.outputs.required_snapshots
+      - run: git checkout ${{ inputs.head_sha }}
+      - run: ${{ inputs.npm_install_command}}
+      - run: ${{ inputs.snapshots_command }}
+      - run: |
+          rm -rf ${{ inputs.vrt_diff_workspace }}/${{ inputs.vrt_diff_dirname }}
+          cp -r ${{ inputs.snapshots_dirpath}} ${{ inputs.vrt_diff_workspace }}/${{ inputs.vrt_diff_dirname }}
+      - run: |
+          cd ${{ inputs.vrt_diff_workspace }}
+          git add -N ${{ inputs.vrt_diff_dirname }}
+          if ! git diff --exit-code --quiet ${{ inputs.vrt_diff_dirname }}
+          then
+            git add ${{ inputs.vrt_diff_dirname }}
+            echo "added_count=$(git diff HEAD --diff-filter=A --name-only | wc -l | xargs)" >> $GITHUB_OUTPUT
+            echo "changed_count=$(git diff HEAD --diff-filter=M --name-only | wc -l | xargs)" >> $GITHUB_OUTPUT
+            echo "deleted_count=$(git diff HEAD --diff-filter=D --name-only | wc -l | xargs)" >> $GITHUB_OUTPUT
+            git commit -m "Update screenshots [ci skip]"
+            git push origin HEAD:${{ inputs.vrt_diff_temp_branch }} -f
+            echo "changed_snapshots_url=https://github.com/${{ inputs.vrt_repo }}/commit/$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          fi
+        id: results
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const isUpdated = !!'${{ steps.results.outputs.changed_snapshots_url }}';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: '${{ inputs.head_sha }}',
+              state: 'success',
+              context: 'VRT Result',
+              target_url: '${{ steps.results.outputs.changed_snapshots_url }}',
+              description: !isUpdated ? '✅ No change' : '❗ Updated: ' +
+                'M'.repeat(${{ steps.results.outputs.changed_count }}) +
+                'A'.repeat(${{ steps.results.outputs.added_count }}) +
+                'D'.repeat(${{ steps.results.outputs.deleted_count }}),
+            });
