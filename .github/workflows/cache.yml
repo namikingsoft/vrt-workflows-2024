@@ -1,0 +1,90 @@
+name: Cache screenshots of base branch
+
+on:
+  workflow_call:
+    inputs:
+      snapshots_command:
+        description: e.g. npm run snapshot
+        required: true
+        type: string
+      snapshots_dirpath:
+        description: e.g. test/vrt.e2e.ts-snapshots
+        required: true
+        type: string
+      your_repo:
+        description: e.g. github.repository
+        type: string
+        default: ${{ github.repository }}
+      head_sha:
+        description: e.g. github.sha
+        type: string
+        default: ${{ github.sha }}
+      npm_install_command:
+        description: e.g. npm ci
+        type: string
+        default: npm ci
+      # Internal variables
+      vrt_repo:
+        description: e.g. org_name/repo_name
+        type: string
+        default: namikingsoft/vrt-diff-2024
+      vrt_diff_workspace:
+        type: string
+        default: .vrt-diff-${{ github.sha }}
+      vrt_diff_dirname:
+        type: string
+        default: diff
+      vrt_diff_head_branch:
+        type: string
+        default: ${{ github.repository }}/${{ github.sha }}
+    secrets:
+      your_repo_github_token:
+        required: true
+      vrt_repo_github_token:
+        required: true
+
+jobs:
+  cache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          repository: ${{ inputs.your_repo }}
+          token: ${{ secrets.your_repo_github_token }}
+          ref: ${{ inputs.head_sha }}
+      - run: |
+          echo "node_version=$(cat .node-version)" >> $GITHUB_OUTPUT
+        id: vars
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.vars.outputs.node_version }}
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          repository: ${{ inputs.vrt_repo }}
+          path: ${{ inputs.vrt_diff_workspace }}
+          token: ${{ secrets.vrt_repo_github_token }}
+      - run: |
+          cd ${{ inputs.vrt_diff_workspace }}
+          git config user.name  "GitHub Action"
+          git config user.email "action@github.com"
+          if ! git checkout ${{ inputs.vrt_diff_head_branch }}
+          then
+            git checkout -b ${{ inputs.vrt_diff_head_branch }}
+            git push origin HEAD:${{ inputs.vrt_diff_head_branch }} -f
+            echo "required_snapshots=true" >> $GITHUB_OUTPUT
+          fi
+        id: checkouts
+      - run: ${{ inputs.npm_install_command}}
+        if: steps.checkouts.outputs.required_snapshots
+      - run: ${{ inputs.snapshots_command }}
+        if: steps.checkouts.outputs.required_snapshots
+      - run: cp -r ${{ inputs.snapshots_dirpath }} ${{ inputs.vrt_diff_workspace }}/${{ inputs.vrt_diff_dirname }}
+        if: steps.checkouts.outputs.required_snapshots
+      - run: |
+          cd ${{ inputs.vrt_diff_workspace }}
+          git add ${{ inputs.vrt_diff_dirname }}
+          git commit -m "Update screenshots [ci skip]"
+          git push origin HEAD:${{ inputs.vrt_diff_head_branch }} -f
+        if: steps.checkouts.outputs.required_snapshots
