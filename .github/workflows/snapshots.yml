@@ -45,28 +45,33 @@ jobs:
   snapshots:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Clone your repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           repository: ${{ inputs.your_repo }}
           token: ${{ secrets.your_repo_github_token }}
-      - run: |
+      - name: Setup variables
+        run: |
           echo "node_version=$(cat .node-version)" >> $GITHUB_OUTPUT
           echo "vrt_diff_workspace=.vrt-diff-${{ inputs.head_sha }}" >> $GITHUB_OUTPUT
           echo "vrt_diff_base_branch=${{ inputs.your_repo }}/${{ inputs.base_sha }}" >> $GITHUB_OUTPUT
           echo "vrt_diff_temp_branch=diff" >> $GITHUB_OUTPUT
           echo "vrt_diff_dirname=diff" >> $GITHUB_OUTPUT
         id: vars
-      - uses: actions/setup-node@v4
+      - name: Setup node.js
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ steps.vars.outputs.node_version }}
-      - uses: actions/checkout@v4
+      - name: Clone vrt repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           repository: ${{ inputs.vrt_repo }}
           path: ${{ steps.vars.outputs.vrt_diff_workspace }}
           token: ${{ secrets.vrt_repo_github_token }}
-      - run: |
+      - name: Checkout base branch on vrt
+        run: |
           cd ${{ steps.vars.outputs.vrt_diff_workspace }}
           git config user.name  "GitHub Action"
           git config user.email "action@github.com"
@@ -77,31 +82,41 @@ jobs:
             echo "required_snapshots=true" >> $GITHUB_OUTPUT
           fi
         id: checkouts
-      - run: git checkout ${{ inputs.base_sha }}
+      - name: Checkout base
+        run: git checkout ${{ inputs.base_sha }}
         if: steps.checkouts.outputs.required_snapshots
-      - run: ${{ inputs.npm_install_command}}
+      - name: Install npm modules on base
+        run: ${{ inputs.npm_install_command}}
         if: steps.checkouts.outputs.required_snapshots
-      - run: ${{ inputs.snapshots_command }}
+      - name: Take snapshots on base
+        run: ${{ inputs.snapshots_command }}
         if: steps.checkouts.outputs.required_snapshots
-      - run: cp -r ${{ inputs.snapshots_dirpath }} ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
+      - name: Copy snapshots to vrt on base
+        run: cp -r ${{ inputs.snapshots_dirpath }} ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
         if: steps.checkouts.outputs.required_snapshots
-      - run: |
+      - name: Push snapshots of base
+        run: |
           cd ${{ steps.vars.outputs.vrt_diff_workspace }}
           git add ${{ steps.vars.outputs.vrt_diff_dirname }}
           git commit -m "Update screenshots [ci skip]"
           git push origin HEAD:${{ steps.vars.outputs.vrt_diff_base_branch }} -f
         if: steps.checkouts.outputs.required_snapshots
-      - run: git checkout ${{ inputs.head_sha }}
+      - name: Checkout head
+        run: git checkout ${{ inputs.head_sha }}
         if: inputs.only_base_for_cache == false
-      - run: ${{ inputs.npm_install_command}}
+      - name: Install npm modules on head
+        run: ${{ inputs.npm_install_command}}
         if: inputs.only_base_for_cache == false
-      - run: ${{ inputs.snapshots_command }}
+      - name: Take snapshots on head
+        run: ${{ inputs.snapshots_command }}
         if: inputs.only_base_for_cache == false
-      - run: |
+      - name: Copy snapshots to vrt on head
+        run: |
           rm -rf ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
           cp -r ${{ inputs.snapshots_dirpath}} ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
         if: inputs.only_base_for_cache == false
-      - run: |
+      - name: Push snapshots of head
+        run: |
           cd ${{ steps.vars.outputs.vrt_diff_workspace }}
           git add -N ${{ steps.vars.outputs.vrt_diff_dirname }}
           if ! git diff --exit-code --quiet ${{ steps.vars.outputs.vrt_diff_dirname }}
@@ -116,7 +131,8 @@ jobs:
           fi
         id: results
         if: inputs.only_base_for_cache == false
-      - uses: actions/github-script@v7
+      - name: Create commit statuses
+        uses: actions/github-script@v7
         with:
           script: |
             const isUpdated = !!'${{ steps.results.outputs.changed_snapshots_url }}';
