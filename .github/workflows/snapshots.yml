@@ -11,26 +11,14 @@ on:
         description: e.g. test/vrt.e2e.ts-snapshots
         required: true
         type: string
-      your_repo:
-        description: e.g. github.repository
-        type: string
-        default: ${{ github.repository }}
-      base_sha:
-        description: e.g. github.event.pull_request.base.sha
-        type: string
-        default: ${{ github.event.pull_request.base.sha }}
-      head_sha:
-        description: e.g github.event.pull_request.base.sha, github.sha
-        type: string
-        default: ${{ github.event.pull_request.head.sha }}
       npm_install_command:
         description: e.g. npm ci
         type: string
         default: npm ci
-      only_base_for_cache:
-        description: e.g. true
-        type: boolean
-        default: false
+      your_repo:
+        description: e.g. github.repository
+        type: string
+        default: ${{ github.repository }}
       vrt_repo:
         description: e.g. org_name/repo_name
         type: string
@@ -54,10 +42,18 @@ jobs:
       - name: Setup variables
         run: |
           echo "node_version=$(cat .node-version)" >> $GITHUB_OUTPUT
-          echo "vrt_diff_workspace=.vrt-diff-${{ inputs.head_sha }}" >> $GITHUB_OUTPUT
-          echo "vrt_diff_base_branch=${{ inputs.your_repo }}/${{ inputs.base_sha }}" >> $GITHUB_OUTPUT
           echo "vrt_diff_temp_branch=diff" >> $GITHUB_OUTPUT
           echo "vrt_diff_dirname=diff" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "vrt_diff_workspace=.vrt-diff-${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+            echo "vrt_diff_base_branch=${{ inputs.your_repo }}/${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
+            echo "base_sha=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
+            echo "head_sha=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "vrt_diff_workspace=.vrt-diff-${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "vrt_diff_base_branch=${{ inputs.your_repo }}/${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "base_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
         id: vars
       - name: Setup node.js
         uses: actions/setup-node@v4
@@ -82,7 +78,7 @@ jobs:
           fi
         id: checkouts
       - name: Checkout base
-        run: git checkout ${{ inputs.base_sha }}
+        run: git checkout ${{ steps.vars.outputs.base_sha }}
         if: steps.checkouts.outputs.required_snapshots
       - name: Install npm modules on base
         run: ${{ inputs.npm_install_command}}
@@ -101,19 +97,19 @@ jobs:
           git push origin HEAD:${{ steps.vars.outputs.vrt_diff_base_branch }} -f
         if: steps.checkouts.outputs.required_snapshots
       - name: Checkout head
-        run: git checkout ${{ inputs.head_sha }}
-        if: inputs.only_base_for_cache == false
+        run: git checkout ${{ steps.vars.outputs.head_sha }}
+        if: github.event_name == 'pull_request'
       - name: Install npm modules on head
         run: ${{ inputs.npm_install_command}}
-        if: inputs.only_base_for_cache == false
+        if: github.event_name == 'pull_request'
       - name: Take snapshots on head
         run: ${{ inputs.snapshots_command }}
-        if: inputs.only_base_for_cache == false
+        if: github.event_name == 'pull_request'
       - name: Copy snapshots to vrt on head
         run: |
           rm -rf ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
           cp -r ${{ inputs.snapshots_dirpath}} ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
-        if: inputs.only_base_for_cache == false
+        if: github.event_name == 'pull_request'
       - name: Push snapshots of head
         run: |
           cd ${{ steps.vars.outputs.vrt_diff_workspace }}
@@ -129,7 +125,7 @@ jobs:
             echo "changed_snapshots_url=https://github.com/${{ inputs.vrt_repo }}/commit/$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           fi
         id: results
-        if: inputs.only_base_for_cache == false
+        if: github.event_name == 'pull_request'
       - name: Create commit statuses
         uses: actions/github-script@v7
         with:
@@ -138,7 +134,7 @@ jobs:
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              sha: '${{ inputs.head_sha }}',
+              sha: '${{ steps.vars.outputs.head_sha }}',
               state: 'success',
               context: 'VRT Result',
               target_url: '${{ steps.results.outputs.changed_snapshots_url }}',
@@ -147,4 +143,4 @@ jobs:
                 'A'.repeat(${{ steps.results.outputs.added_count }}) +
                 'D'.repeat(${{ steps.results.outputs.deleted_count }}),
             });
-        if: inputs.only_base_for_cache == false
+        if: github.event_name == 'pull_request'
