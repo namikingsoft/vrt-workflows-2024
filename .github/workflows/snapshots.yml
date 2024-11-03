@@ -70,7 +70,7 @@ jobs:
           repository: ${{ inputs.vrt_repo }}
           path: ${{ steps.vars.outputs.vrt_diff_workspace }}
           token: ${{ secrets.vrt_repo_github_token }}
-      - name: Checkout base branch on vrt
+      - name: Checkout vrt by base branch
         run: |
           cd ${{ steps.vars.outputs.vrt_diff_workspace }}
           git config user.name  "GitHub Action"
@@ -78,7 +78,6 @@ jobs:
           if ! git checkout ${{ steps.vars.outputs.vrt_diff_base_branch }}
           then
             git checkout -b ${{ steps.vars.outputs.vrt_diff_base_branch }}
-            git push origin HEAD:${{ steps.vars.outputs.vrt_diff_base_branch }} -f
             echo "required_snapshots=true" >> $GITHUB_OUTPUT
           fi
         id: checkouts
