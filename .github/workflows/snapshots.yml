@@ -20,9 +20,9 @@ on:
         type: string
         default: ${{ github.repository }}
       vrt_repo:
-        description: e.g. org_name/repo_name
+        description: e.g. org_name/vrt-workflows-2024
+        required: true
         type: string
-        default: namikingsoft/vrt-diff-2024
     secrets:
       your_repo_github_token:
         required: true
