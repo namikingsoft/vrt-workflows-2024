@@ -20,30 +20,21 @@ on:
         type: string
         default: ${{ github.event.pull_request.base.sha }}
       head_sha:
-        description: e.g github.event.pull_request.head.sha
+        description: e.g github.event.pull_request.base.sha, github.sha
         type: string
         default: ${{ github.event.pull_request.head.sha }}
       npm_install_command:
         description: e.g. npm ci
         type: string
         default: npm ci
-      # Internal variables
+      only_base_for_cache:
+        description: e.g. true
+        type: boolean
+        default: false
       vrt_repo:
         description: e.g. org_name/repo_name
         type: string
         default: namikingsoft/vrt-diff-2024
-      vrt_diff_workspace:
-        type: string
-        default: .vrt-diff-${{ github.event.pull_request.head.sha }}
-      vrt_diff_dirname:
-        type: string
-        default: diff
-      vrt_diff_base_branch:
-        type: string
-        default: ${{ github.repository }}/${{ github.event.pull_request.base.sha }}
-      vrt_diff_temp_branch:
-        type: string
-        default: diff
     secrets:
       your_repo_github_token:
         required: true
@@ -51,7 +42,7 @@ on:
         required: true
 
 jobs:
-  diff:
+  snapshots:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,6 +52,10 @@ jobs:
           token: ${{ secrets.your_repo_github_token }}
       - run: |
           echo "node_version=$(cat .node-version)" >> $GITHUB_OUTPUT
+          echo "vrt_diff_workspace=.vrt-diff-${{ inputs.head_sha }}" >> $GITHUB_OUTPUT
+          echo "vrt_diff_base_branch=${{ inputs.your_repo }}/${{ inputs.base_sha }}" >> $GITHUB_OUTPUT
+          echo "vrt_diff_temp_branch=diff" >> $GITHUB_OUTPUT
+          echo "vrt_diff_dirname=diff" >> $GITHUB_OUTPUT
         id: vars
       - uses: actions/setup-node@v4
         with:
@@ -69,16 +64,16 @@ jobs:
         with:
           fetch-depth: 0
           repository: ${{ inputs.vrt_repo }}
-          path: ${{ inputs.vrt_diff_workspace }}
+          path: ${{ steps.vars.outputs.vrt_diff_workspace }}
           token: ${{ secrets.vrt_repo_github_token }}
       - run: |
-          cd ${{ inputs.vrt_diff_workspace }}
+          cd ${{ steps.vars.outputs.vrt_diff_workspace }}
           git config user.name  "GitHub Action"
           git config user.email "action@github.com"
-          if ! git checkout ${{ inputs.vrt_diff_base_branch }}
+          if ! git checkout ${{ steps.vars.outputs.vrt_diff_base_branch }}
           then
-            git checkout -b ${{ inputs.vrt_diff_base_branch }}
-            git push origin HEAD:${{ inputs.vrt_diff_base_branch }} -f
+            git checkout -b ${{ steps.vars.outputs.vrt_diff_base_branch }}
+            git push origin HEAD:${{ steps.vars.outputs.vrt_diff_base_branch }} -f
             echo "required_snapshots=true" >> $GITHUB_OUTPUT
           fi
         id: checkouts
@@ -88,34 +83,39 @@ jobs:
         if: steps.checkouts.outputs.required_snapshots
       - run: ${{ inputs.snapshots_command }}
         if: steps.checkouts.outputs.required_snapshots
-      - run: cp -r ${{ inputs.snapshots_dirpath }} ${{ inputs.vrt_diff_workspace }}/${{ inputs.vrt_diff_dirname }}
+      - run: cp -r ${{ inputs.snapshots_dirpath }} ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
         if: steps.checkouts.outputs.required_snapshots
       - run: |
-          cd ${{ inputs.vrt_diff_workspace }}
-          git add ${{ inputs.vrt_diff_dirname }}
+          cd ${{ steps.vars.outputs.vrt_diff_workspace }}
+          git add ${{ steps.vars.outputs.vrt_diff_dirname }}
           git commit -m "Update screenshots [ci skip]"
-          git push origin HEAD:${{ inputs.vrt_diff_base_branch }} -f
+          git push origin HEAD:${{ steps.vars.outputs.vrt_diff_base_branch }} -f
         if: steps.checkouts.outputs.required_snapshots
       - run: git checkout ${{ inputs.head_sha }}
+        if: inputs.only_base_for_cache == false
       - run: ${{ inputs.npm_install_command}}
+        if: inputs.only_base_for_cache == false
       - run: ${{ inputs.snapshots_command }}
+        if: inputs.only_base_for_cache == false
       - run: |
-          rm -rf ${{ inputs.vrt_diff_workspace }}/${{ inputs.vrt_diff_dirname }}
-          cp -r ${{ inputs.snapshots_dirpath}} ${{ inputs.vrt_diff_workspace }}/${{ inputs.vrt_diff_dirname }}
+          rm -rf ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
+          cp -r ${{ inputs.snapshots_dirpath}} ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
+        if: inputs.only_base_for_cache == false
       - run: |
-          cd ${{ inputs.vrt_diff_workspace }}
-          git add -N ${{ inputs.vrt_diff_dirname }}
-          if ! git diff --exit-code --quiet ${{ inputs.vrt_diff_dirname }}
+          cd ${{ steps.vars.outputs.vrt_diff_workspace }}
+          git add -N ${{ steps.vars.outputs.vrt_diff_dirname }}
+          if ! git diff --exit-code --quiet ${{ steps.vars.outputs.vrt_diff_dirname }}
           then
-            git add ${{ inputs.vrt_diff_dirname }}
+            git add ${{ steps.vars.outputs.vrt_diff_dirname }}
             echo "added_count=$(git diff HEAD --diff-filter=A --name-only | wc -l | xargs)" >> $GITHUB_OUTPUT
             echo "changed_count=$(git diff HEAD --diff-filter=M --name-only | wc -l | xargs)" >> $GITHUB_OUTPUT
             echo "deleted_count=$(git diff HEAD --diff-filter=D --name-only | wc -l | xargs)" >> $GITHUB_OUTPUT
             git commit -m "Update screenshots [ci skip]"
-            git push origin HEAD:${{ inputs.vrt_diff_temp_branch }} -f
+            git push origin HEAD:${{ steps.vars.outputs.vrt_diff_temp_branch }} -f
             echo "changed_snapshots_url=https://github.com/${{ inputs.vrt_repo }}/commit/$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           fi
         id: results
+        if: inputs.only_base_for_cache == false
       - uses: actions/github-script@v7
         with:
           script: |
@@ -132,3 +132,4 @@ jobs:
                 'A'.repeat(${{ steps.results.outputs.added_count }}) +
                 'D'.repeat(${{ steps.results.outputs.deleted_count }}),
             });
+        if: inputs.only_base_for_cache == false
