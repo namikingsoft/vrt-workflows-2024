@@ -51,7 +51,7 @@ jobs:
             echo "head_sha=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
           else
             echo "vrt_diff_workspace=.vrt-diff-${{ github.sha }}" >> $GITHUB_OUTPUT
-            echo "vrt_diff_base_branch=${{ inputs.your_repo }}/${{ github.sha }}" >> $GITHUB_OUTPUT
+            echo "vrt_diff_base_branch=snapshots/${{ inputs.your_repo }}/${{ github.sha }}" >> $GITHUB_OUTPUT
             echo "base_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
           fi
         id: vars
