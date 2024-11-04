@@ -1,7 +1,7 @@
 # GitHub Actions workflows for Visual Regression Test
 
 ```yml
-sname: VRT
+name: VRT
 
 on:
   pull_request:
