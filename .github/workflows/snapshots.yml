@@ -19,6 +19,9 @@ on:
         description: e.g. test/vrt.e2e.ts-snapshots
         required: true
         type: string
+      cache_path:
+        description: e.g. ~/.cache/ms-playwright
+        type: string
       your_repo:
         description: e.g. github.repository
         type: string
@@ -70,6 +73,12 @@ jobs:
         with:
           node-version: ${{ inputs.node_version }}
           cache: ${{ inputs.package_manager}}
+      - uses: actions/cache@v4
+        with:
+          path: ${{ inputs.cache_path }}
+          key: ${{ runner.os }}-vrt-${{ hashFiles('package.json') }}
+          restore-keys: ${{ runner.os }}-vrt-
+        if: inputs.cache_path
       - name: Clone vrt repository
         uses: actions/checkout@v4
         with:
