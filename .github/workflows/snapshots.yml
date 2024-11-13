@@ -3,6 +3,14 @@ name: Diff screenshots via Pull Request
 on:
   workflow_call:
     inputs:
+      node_version:
+        description: e.g. x.y.z
+        required: true
+        type: string
+      package_manager:
+        description: e.g. npm or yarn
+        required: true
+        type: string
       snapshots_command:
         description: e.g. npm run snapshot
         required: true
@@ -11,10 +19,6 @@ on:
         description: e.g. test/vrt.e2e.ts-snapshots
         required: true
         type: string
-      npm_install_command:
-        description: e.g. npm ci
-        type: string
-        default: npm ci
       your_repo:
         description: e.g. github.repository
         type: string
@@ -48,7 +52,6 @@ jobs:
           token: ${{ secrets.your_repo_github_token }}
       - name: Setup variables
         run: |
-          echo "node_version=$(cat .node-version)" >> $GITHUB_OUTPUT
           echo "vrt_diff_temp_branch=diff" >> $GITHUB_OUTPUT
           echo "vrt_diff_dirname=diff" >> $GITHUB_OUTPUT
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -65,7 +68,8 @@ jobs:
       - name: Setup node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ steps.vars.outputs.node_version }}
+          node-version: ${{ inputs.node_version }}
+          cache: ${{ inputs.package_manager}}
       - name: Clone vrt repository
         uses: actions/checkout@v4
         with:
@@ -88,7 +92,11 @@ jobs:
         run: git checkout ${{ steps.vars.outputs.base_sha }}
         if: steps.checkouts.outputs.required_snapshots
       - name: Install npm modules on base
-        run: ${{ inputs.npm_install_command}}
+        run: |
+          case "${{ inputs.package_manager }}" in
+            npm)  npm ci ;;
+            yarn) yarn install --frozen-lockfile ;;
+          esac
         if: steps.checkouts.outputs.required_snapshots
       - name: Take snapshots on base
         run: ${{ inputs.snapshots_command }}
@@ -107,7 +115,11 @@ jobs:
         run: git checkout ${{ steps.vars.outputs.head_sha }}
         if: github.event_name == 'pull_request'
       - name: Install npm modules on head
-        run: ${{ inputs.npm_install_command}}
+        run: |
+          case "${{ inputs.package_manager }}" in
+            npm)  npm ci ;;
+            yarn) yarn install --frozen-lockfile ;;
+          esac
         if: github.event_name == 'pull_request'
       - name: Take snapshots on head
         run: ${{ inputs.snapshots_command }}
