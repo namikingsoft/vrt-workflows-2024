@@ -31,6 +31,10 @@ on:
         description: e.g. v1.49.1-noble
         type: string
         default: latest
+      force_update_base_snapshots:
+        description: e.g. true or false
+        type: boolean
+        default: false
     secrets:
       your_repo_github_token:
         required: true
@@ -87,35 +91,34 @@ jobs:
           cd ${{ steps.vars.outputs.vrt_diff_workspace }}
           git config user.name  "GitHub Action"
           git config user.email "action@github.com"
-          if ! git checkout ${{ steps.vars.outputs.vrt_diff_base_branch }}
-          then
+          if [ "${{ inputs.force_update_base_snapshots }}" = "true" ] || ! git checkout ${{ steps.vars.outputs.vrt_diff_base_branch }}; then
             git checkout -b ${{ steps.vars.outputs.vrt_diff_base_branch }}
-            echo "required_snapshots=true" >> $GITHUB_OUTPUT
+            echo "required_base_snapshots=true" >> $GITHUB_OUTPUT
           fi
         id: checkouts
       - name: Checkout base
         run: git checkout ${{ steps.vars.outputs.base_sha }}
-        if: steps.checkouts.outputs.required_snapshots
+        if: steps.checkouts.outputs.required_base_snapshots
       - name: Install npm modules on base
         run: |
           case "${{ inputs.package_manager }}" in
             npm)  npm ci ;;
             yarn) yarn install --frozen-lockfile ;;
           esac
-        if: steps.checkouts.outputs.required_snapshots
+        if: steps.checkouts.outputs.required_base_snapshots
       - name: Take snapshots on base
         run: ${{ inputs.snapshots_command }}
-        if: steps.checkouts.outputs.required_snapshots
+        if: steps.checkouts.outputs.required_base_snapshots
       - name: Copy snapshots to vrt on base
         run: cp -r ${{ inputs.snapshots_dirpath }} ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
-        if: steps.checkouts.outputs.required_snapshots
+        if: steps.checkouts.outputs.required_base_snapshots
       - name: Push snapshots of base
         run: |
           cd ${{ steps.vars.outputs.vrt_diff_workspace }}
           git add ${{ steps.vars.outputs.vrt_diff_dirname }}
           git commit -m "Update screenshots [ci skip]"
           git push origin HEAD:${{ steps.vars.outputs.vrt_diff_base_branch }} -f
-        if: steps.checkouts.outputs.required_snapshots
+        if: steps.checkouts.outputs.required_base_snapshots
       - name: Checkout head
         run: git checkout ${{ steps.vars.outputs.head_sha }}
         if: github.event_name == 'pull_request'
@@ -132,7 +135,7 @@ jobs:
       - name: Copy snapshots to vrt on head
         run: |
           rm -rf ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
-          cp -r ${{ inputs.snapshots_dirpath}} ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
+          cp -r ${{ inputs.snapshots_dirpath }} ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }}
         if: github.event_name == 'pull_request'
       - name: Push snapshots of head
         run: |
