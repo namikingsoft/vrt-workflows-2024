@@ -7,8 +7,8 @@ on:
         description: e.g. x.y.z
         required: true
         type: string
-      package_manager:
-        description: e.g. npm or yarn
+      install_command:
+        description: e.g. npm ci
         required: true
         type: string
       snapshots_command:
@@ -35,6 +35,15 @@ on:
         description: e.g. true or false
         type: boolean
         default: false
+      cache_key:
+        description: pass to key of actions/cache@v4
+        type: string
+      cache_paths:
+        description: pass to pathes of actions/cache@v4
+        type: string
+      cache_restore_keys:
+        description: pass to restore-keys of actions/cache@v4
+        type: string
     secrets:
       your_repo_github_token:
         required: true
@@ -78,7 +87,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node_version }}
-          cache: ${{ inputs.package_manager}}
       - name: Clone vrt repository
         uses: actions/checkout@v4
         with:
@@ -86,6 +94,13 @@ jobs:
           repository: ${{ inputs.vrt_repo }}
           path: ${{ steps.vars.outputs.vrt_diff_workspace }}
           token: ${{ secrets.vrt_repo_github_token }}
+      - name: Restore some caches
+        uses: actions/cache@v4
+        with:
+          key: ${{ inputs.cache_key }}
+          path: ${{ inputs.cache_paths }}
+          restore-keys: ${{ inputs.cache_restore_keys }}
+        if: inputs.cache_key
       - name: Checkout vrt by base branch
         run: |
           cd ${{ steps.vars.outputs.vrt_diff_workspace }}
@@ -100,11 +115,7 @@ jobs:
         run: git checkout ${{ steps.vars.outputs.base_sha }}
         if: steps.checkouts.outputs.required_base_snapshots
       - name: Install npm modules on base
-        run: |
-          case "${{ inputs.package_manager }}" in
-            npm)  npm ci ;;
-            yarn) yarn install --frozen-lockfile ;;
-          esac
+        run: ${{ inputs.install_command }}
         if: steps.checkouts.outputs.required_base_snapshots
       - name: Take snapshots on base
         run: ${{ inputs.snapshots_command }}
@@ -123,11 +134,7 @@ jobs:
         run: git checkout ${{ steps.vars.outputs.head_sha }}
         if: github.event_name == 'pull_request'
       - name: Install npm modules on head
-        run: |
-          case "${{ inputs.package_manager }}" in
-            npm)  npm ci ;;
-            yarn) yarn install --frozen-lockfile ;;
-          esac
+        run: ${{ inputs.install_command }}
         if: github.event_name == 'pull_request'
       - name: Take snapshots on head
         run: ${{ inputs.snapshots_command }}
