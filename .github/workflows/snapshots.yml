@@ -130,6 +130,9 @@ jobs:
           git commit -m "Update screenshots [ci skip]"
           git push origin HEAD:${{ steps.vars.outputs.vrt_diff_base_branch }} -f
         if: steps.checkouts.outputs.required_base_snapshots
+      - name: Copy base snapshots from vrt
+        run: cp -r ${{ steps.vars.outputs.vrt_diff_workspace }}/${{ steps.vars.outputs.vrt_diff_dirname }} ${{ inputs.snapshots_dirpath }}
+        if: steps.checkouts.outputs.required_base_snapshots == false
       - name: Checkout head
         run: git checkout ${{ steps.vars.outputs.head_sha }}
         if: github.event_name == 'pull_request'
