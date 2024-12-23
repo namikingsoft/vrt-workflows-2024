@@ -141,11 +141,13 @@ jobs:
         with:
           name: base_snapshots_${{ matrix.shard_index }}
           path: ${{ inputs.snapshots_dirpath }}
+          retention-days: 3
       - name: Upload test-results on failure for debug
         uses: actions/upload-artifact@v4
         with:
           name: test-results
           path: test-results
+          retention-days: 3
         if: failure()
 
   commit_base:
@@ -225,11 +227,13 @@ jobs:
         with:
           name: head_snapshots_${{ matrix.shard_index }}
           path: ${{ inputs.snapshots_dirpath }}
+          retention-days: 3
       - name: Upload test-results on failure for debug
         uses: actions/upload-artifact@v4
         with:
           name: test-results
           path: test-results
+          retention-days: 3
         if: failure()
 
   commit_head:
