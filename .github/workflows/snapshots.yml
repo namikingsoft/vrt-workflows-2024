@@ -220,12 +220,16 @@ jobs:
         if: inputs.cache_key
       - name: Install npm modules on head
         run: ${{ inputs.install_command }}
+      - name: Mark timestamp before head snapshot
+        run: touch /tmp/.before_snapshot_timestamp
       - name: Take snapshots on head
         run: ${{ inputs.snapshots_command }} --shard ${{ matrix.shard_index }}/${{ matrix.shard_total }}
-      - name: Upload head snapshots
+      - name: Keep only updated snapshots for this shard
+        run: find ${{ inputs.snapshots_dirpath }} -type f ! -newer /tmp/.before_snapshot_timestamp -exec rm -f {} +
+      - name: Upload updated snapshots
         uses: actions/upload-artifact@v4
         with:
-          name: head_snapshots_${{ matrix.shard_index }}
+          name: updated_snapshots_${{ matrix.shard_index }}
           path: ${{ inputs.snapshots_dirpath }}
           retention-days: 3
       - name: Upload test-results on failure for debug
@@ -248,11 +252,17 @@ jobs:
           ref: ${{ needs.init.outputs.vrt_diff_base_branch }}
           path: ${{ needs.init.outputs.vrt_diff_workspace }}
           token: ${{ secrets.vrt_repo_github_token }}
-      - name: Download base snapshots
+      - name: Download head snapshots
         uses: actions/download-artifact@v4
         with:
           path: ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
-          pattern: head_snapshots_*
+          pattern: base_snapshots_*
+          merge-multiple: true
+      - name: Download updated snapshots
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
+          pattern: updated_snapshots_*
           merge-multiple: true
       - name: Push snapshots of head
         run: |
