@@ -252,12 +252,6 @@ jobs:
           ref: ${{ needs.init.outputs.vrt_diff_base_branch }}
           path: ${{ needs.init.outputs.vrt_diff_workspace }}
           token: ${{ secrets.vrt_repo_github_token }}
-      - name: Download base snapshots
-        uses: actions/download-artifact@v4
-        with:
-          path: ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
-          pattern: base_snapshots_*
-          merge-multiple: true
       - name: Download updated snapshots
         uses: actions/download-artifact@v4
         with:
