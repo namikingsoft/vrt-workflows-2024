@@ -252,6 +252,8 @@ jobs:
           ref: ${{ needs.init.outputs.vrt_diff_base_branch }}
           path: ${{ needs.init.outputs.vrt_diff_workspace }}
           token: ${{ secrets.vrt_repo_github_token }}
+      - name: Remove existing snapshots directory
+        run: rm -rf ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
       - name: Download updated snapshots
         uses: actions/download-artifact@v4
         with:
