@@ -269,9 +269,9 @@ jobs:
           if ! git diff --exit-code --quiet ${{ needs.init.outputs.vrt_diff_dirname }}
           then
             git add ${{ needs.init.outputs.vrt_diff_dirname }}
-            echo "added_count=$(git diff HEAD --diff-filter=A --name-only | wc -l | xargs)" >> $GITHUB_OUTPUT
-            echo "changed_count=$(git diff HEAD --diff-filter=M --name-only | wc -l | xargs)" >> $GITHUB_OUTPUT
-            echo "deleted_count=$(git diff HEAD --diff-filter=D --name-only | wc -l | xargs)" >> $GITHUB_OUTPUT
+            echo "added_count=$(git diff HEAD --diff-filter=A --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
+            echo "changed_count=$(git diff HEAD --diff-filter=M --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
+            echo "deleted_count=$(git diff HEAD --diff-filter=D --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
             git commit -m "Update screenshots [ci skip]"
             git push origin HEAD:${{ needs.init.outputs.vrt_diff_temp_branch }} -f
             echo "changed_snapshots_url=https://github.com/${{ inputs.vrt_repo }}/commit/$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
