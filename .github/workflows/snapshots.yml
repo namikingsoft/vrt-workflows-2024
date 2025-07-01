@@ -241,7 +241,7 @@ jobs:
         if: failure()
 
   commit_head:
-    if: ${{ !cancelled() && !failure() }}
+    if: ${{ github.event_name == 'pull_request' && !cancelled() && !failure() }}
     needs: [init, commit_base, head]
     runs-on: ubuntu-latest
     steps:
