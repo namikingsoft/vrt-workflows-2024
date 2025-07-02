@@ -1,0 +1,274 @@
+name: Visual Regression Test
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      your_repo_github_token:
+        description: e.g. secrets.GITHUB_TOKEN
+        type: string
+        required: true
+      node_version:
+        description: e.g. x.y.z
+        type: string
+        required: true
+      snapshots_command:
+        description: e.g. npm run snapshot
+        type: string
+        required: true
+      snapshots_dirpath:
+        description: e.g. test/vrt.e2e.ts-snapshots
+        type: string
+        required: true
+      your_repo:
+        description: e.g. org_name/repo_name
+        type: string
+        required: true
+      head_sha:
+        description: commit sha of the head branch
+        type: string
+        default: ""
+      base_sha:
+        description: commit sha of the base branch
+        type: string
+        required: true
+      playwright_image_tag:
+        description: e.g. v1.49.1-noble
+        type: string
+        required: true
+      shard_count:
+        description: append argument --shard=1/n to the snapshots_command
+        type: number
+        required: true
+      force_update_base_snapshots:
+        description: e.g. true or false
+        type: boolean
+        required: true
+
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    outputs:
+      shard_indexes_json: ${{ steps.vars.outputs.shard_indexes_json }}
+      vrt_diff_temp_branch: ${{ steps.vars.outputs.vrt_diff_temp_branch }}
+      vrt_diff_dirname: ${{ steps.vars.outputs.vrt_diff_dirname }}
+      vrt_diff_workspace: ${{ steps.vars.outputs.vrt_diff_workspace }}
+      vrt_diff_base_branch: ${{ steps.vars.outputs.vrt_diff_base_branch }}
+      required_base_snapshots: ${{ steps.checkouts.outputs.required_base_snapshots }}
+    steps:
+      - name: Setup variables
+        run: |
+          echo "shard_indexes_json=$(seq ${{ inputs.shard_count }} | jq -cs 'map("\(.)")')" > $GITHUB_OUTPUT
+          echo "vrt_diff_temp_branch=diff" >> $GITHUB_OUTPUT
+          echo "vrt_diff_dirname=diff" >> $GITHUB_OUTPUT
+          echo "vrt_diff_workspace=.vrt-diff-${{ inputs.head_sha }}" >> $GITHUB_OUTPUT
+          echo "vrt_diff_base_branch=snapshots/${{ inputs.your_repo }}/${{ inputs.base_sha }}" >> $GITHUB_OUTPUT
+        id: vars
+      - name: Clone vrt repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.vars.outputs.vrt_diff_base_branch }}
+          path: ${{ steps.vars.outputs.vrt_diff_workspace }}
+        continue-on-error: true
+        id: base
+      - name: Set required base snapshots on failure
+        run: echo "required_base_snapshots=true" >> $GITHUB_OUTPUT
+        if: steps.base.outcome == 'failure' || inputs.force_update_base_snapshots
+        id: checkouts
+
+  base:
+    if: needs.init.outputs.required_base_snapshots
+    needs: init
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:${{ inputs.playwright_image_tag }}
+    env:
+      GPR_READ_TOKEN: ${{ secrets.GPR_READ_TOKEN }}
+    strategy:
+      matrix:
+        shard_index: ${{ fromJson(needs.init.outputs.shard_indexes_json) }}
+        shard_total:
+          - ${{ inputs.shard_count }}
+    steps:
+      - name: Set safe directory for permission on docker container
+        run: git config --global --add safe.directory "$(pwd)"
+      - name: Clone your repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.your_repo }}
+          token: ${{ inputs.your_repo_github_token}}
+          ref: ${{ inputs.base_sha }}
+      - name: Setup node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+      - name: Restore node modules caches
+        uses: actions/cache@v4
+        with:
+          key: node_modules_${{ hashFiles('package-lock.json', 'yarn.lock') }}
+          path: node_modules
+      - name: Install npm modules on base
+        run: |
+          if [ -f "yarn.lock" ]; then
+            yarn install --frozen-lockfile
+          else
+            npm ci
+          fi
+      - name: Take snapshots on base
+        run: ${{ inputs.snapshots_command }} --shard ${{ matrix.shard_index }}/${{ matrix.shard_total }}
+      - name: Upload base snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: base_snapshots_${{ matrix.shard_index }}
+          path: ${{ inputs.snapshots_dirpath }}
+          retention-days: 3
+      - name: Upload test-results on failure for debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results
+          retention-days: 3
+        if: failure()
+
+  commit_base:
+    needs: [init, base]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone vrt repository
+        uses: actions/checkout@v4
+        with:
+          path: ${{ needs.init.outputs.vrt_diff_workspace }}
+      - name: Download base snapshots
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
+          pattern: base_snapshots_*
+          merge-multiple: true
+      - name: Push vrt by base branch
+        run: |
+          cd ${{ needs.init.outputs.vrt_diff_workspace }}
+          git config user.name  "GitHub Action"
+          git config user.email "action@github.com"
+          git checkout -b ${{ needs.init.outputs.vrt_diff_base_branch }}
+          git add ${{ needs.init.outputs.vrt_diff_dirname }}
+          git commit -m "Update screenshots [ci skip]"
+          git push origin HEAD:${{ needs.init.outputs.vrt_diff_base_branch }} -f
+
+  head:
+    if: ${{ inputs.head_sha != '' && !cancelled() && !failure() }}
+    needs: [init, commit_base]
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:${{ inputs.playwright_image_tag }}
+    env:
+      GPR_READ_TOKEN: ${{ secrets.GPR_READ_TOKEN }}
+    strategy:
+      matrix:
+        shard_index: ${{ fromJson(needs.init.outputs.shard_indexes_json) }}
+        shard_total:
+          - ${{ inputs.shard_count }}
+    steps:
+      - name: Set safe directory for permission on docker container
+        run: git config --global --add safe.directory "$(pwd)"
+      - name: Clone your repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.your_repo }}
+          token: ${{ inputs.your_repo_github_token}}
+          ref: ${{ inputs.head_sha }}
+      - name: Clone vrt repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.init.outputs.vrt_diff_base_branch }}
+          path: ${{ needs.init.outputs.vrt_diff_workspace }}
+      - name: Copy base snapshots from vrt
+        run: cp -r ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }} ${{ inputs.snapshots_dirpath }}
+      - name: Setup node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+      - name: Restore node modules caches
+        uses: actions/cache@v4
+        with:
+          key: node_modules_${{ hashFiles('package-lock.json', 'yarn.lock') }}
+          path: node_modules
+      - name: Install npm modules on head
+        run: |
+          if [ -f "yarn.lock" ]; then
+            yarn install --frozen-lockfile
+          else
+            npm ci
+          fi
+      - name: Mark timestamp before head snapshot
+        run: touch /tmp/.before_snapshot_timestamp
+      - name: Take snapshots on head
+        run: ${{ inputs.snapshots_command }} --shard ${{ matrix.shard_index }}/${{ matrix.shard_total }}
+      - name: Keep only updated snapshots for this shard
+        run: find ${{ inputs.snapshots_dirpath }} -type f ! -newer /tmp/.before_snapshot_timestamp -exec rm -f {} +
+      - name: Upload updated snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: updated_snapshots_${{ matrix.shard_index }}
+          path: ${{ inputs.snapshots_dirpath }}
+          retention-days: 3
+      - name: Upload test-results on failure for debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results
+          retention-days: 3
+        if: failure()
+
+  commit_head:
+    if: ${{ inputs.head_sha != '' && !cancelled() && !failure() }}
+    needs: [init, commit_base, head]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone vrt repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.init.outputs.vrt_diff_base_branch }}
+          path: ${{ needs.init.outputs.vrt_diff_workspace }}
+      - name: Remove existing snapshots directory
+        run: rm -rf ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
+      - name: Download updated snapshots
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
+          pattern: updated_snapshots_*
+          merge-multiple: true
+      - name: Push snapshots of head
+        run: |
+          cd ${{ needs.init.outputs.vrt_diff_workspace }}
+          git config user.name  "GitHub Action"
+          git config user.email "action@github.com"
+          git add -N ${{ needs.init.outputs.vrt_diff_dirname }}
+          if ! git diff --exit-code --quiet ${{ needs.init.outputs.vrt_diff_dirname }}
+          then
+            git add ${{ needs.init.outputs.vrt_diff_dirname }}
+            echo "added_count=$(git diff HEAD --diff-filter=A --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
+            echo "changed_count=$(git diff HEAD --diff-filter=M --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
+            echo "deleted_count=$(git diff HEAD --diff-filter=D --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
+            git commit -m "Update screenshots [ci skip]"
+            git push origin HEAD:${{ needs.init.outputs.vrt_diff_temp_branch }} -f
+            echo "changed_snapshots_url=https://github.com/${{ github.repository }}/commit/$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          fi
+        id: results
+      - name: Push snapshots of head
+        run: |
+          cat <<EOF > /tmp/vrt-result.json
+          {
+            "changedSnapshotUrl": "${{ steps.results.outputs.changed_snapshots_url }}",
+            "addedCount": "${{ steps.results.outputs.added_count }}",
+            "changedCount": "${{ steps.results.outputs.changed_count }}",
+            "deletedCount": "${{ steps.results.outputs.deleted_count }}"
+          }
+          EOF
+      - name: Upload vrt result
+        uses: actions/upload-artifact@v4
+        with:
+          name: vrt_result
+          path: /tmp/vrt-result.json
+          retention-days: 3
