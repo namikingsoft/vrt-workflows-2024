@@ -1,60 +1,51 @@
-name: Diff screenshots via Pull Request
+name: Visual Regression Test
+
+permissions:
+  contents: write
 
 on:
-  workflow_call:
+  workflow_dispatch:
     inputs:
+      your_repo_github_token:
+        description: e.g. secrets.GITHUB_TOKEN
+        type: string
+        required: true
       node_version:
         description: e.g. x.y.z
-        required: true
         type: string
-      install_command:
-        description: e.g. npm ci
         required: true
-        type: string
       snapshots_command:
         description: e.g. npm run snapshot
-        required: true
         type: string
+        required: true
       snapshots_dirpath:
         description: e.g. test/vrt.e2e.ts-snapshots
-        required: true
         type: string
+        required: true
       your_repo:
-        description: e.g. github.repository
+        description: e.g. org_name/repo_name
         type: string
-        default: ${{ github.repository }}
-      vrt_repo:
-        description: e.g. org_name/vrt-workflows-2024
         required: true
+      head_sha:
+        description: commit sha of the head branch
         type: string
+        default: ""
+      base_sha:
+        description: commit sha of the base branch
+        type: string
+        required: true
       playwright_image_tag:
         description: e.g. v1.49.1-noble
         type: string
-        default: latest
-      force_update_base_snapshots:
-        description: e.g. true or false
-        type: boolean
-        default: false
-      cache_key:
-        description: pass to key of actions/cache@v4
-        type: string
-      cache_paths:
-        description: pass to pathes of actions/cache@v4
-        type: string
-      cache_restore_keys:
-        description: pass to restore-keys of actions/cache@v4
-        type: string
+        required: true
       shard_count:
         description: append argument --shard=1/n to the snapshots_command
         type: number
-        default: 4
-    secrets:
-      your_repo_github_token:
         required: true
-      vrt_repo_github_token:
+      force_update_base_snapshots:
+        description: e.g. true or false
+        type: boolean
         required: true
-      env_gpr_read_token:
-        required: false
 
 jobs:
   init:
@@ -65,8 +56,6 @@ jobs:
       vrt_diff_dirname: ${{ steps.vars.outputs.vrt_diff_dirname }}
       vrt_diff_workspace: ${{ steps.vars.outputs.vrt_diff_workspace }}
       vrt_diff_base_branch: ${{ steps.vars.outputs.vrt_diff_base_branch }}
-      base_sha: ${{ steps.vars.outputs.base_sha }}
-      head_sha: ${{ steps.vars.outputs.head_sha }}
       required_base_snapshots: ${{ steps.checkouts.outputs.required_base_snapshots }}
     steps:
       - name: Setup variables
@@ -74,24 +63,14 @@ jobs:
           echo "shard_indexes_json=$(seq ${{ inputs.shard_count }} | jq -cs 'map("\(.)")')" > $GITHUB_OUTPUT
           echo "vrt_diff_temp_branch=diff" >> $GITHUB_OUTPUT
           echo "vrt_diff_dirname=diff" >> $GITHUB_OUTPUT
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "vrt_diff_workspace=.vrt-diff-${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
-            echo "vrt_diff_base_branch=snapshots/${{ inputs.your_repo }}/${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
-            echo "base_sha=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
-            echo "head_sha=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
-          else
-            echo "vrt_diff_workspace=.vrt-diff-${{ github.sha }}" >> $GITHUB_OUTPUT
-            echo "vrt_diff_base_branch=snapshots/${{ inputs.your_repo }}/${{ github.sha }}" >> $GITHUB_OUTPUT
-            echo "base_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
-          fi
+          echo "vrt_diff_workspace=.vrt-diff-${{ inputs.head_sha }}" >> $GITHUB_OUTPUT
+          echo "vrt_diff_base_branch=snapshots/${{ inputs.your_repo }}/${{ inputs.base_sha }}" >> $GITHUB_OUTPUT
         id: vars
       - name: Clone vrt repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.vrt_repo }}
           ref: ${{ steps.vars.outputs.vrt_diff_base_branch }}
           path: ${{ steps.vars.outputs.vrt_diff_workspace }}
-          token: ${{ secrets.vrt_repo_github_token }}
         continue-on-error: true
         id: base
       - name: Set required base snapshots on failure
@@ -106,7 +85,7 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:${{ inputs.playwright_image_tag }}
     env:
-      GPR_READ_TOKEN: ${{ secrets.env_gpr_read_token }}
+      GPR_READ_TOKEN: ${{ secrets.GPR_READ_TOKEN }}
     strategy:
       matrix:
         shard_index: ${{ fromJson(needs.init.outputs.shard_indexes_json) }}
@@ -119,21 +98,24 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.your_repo }}
-          token: ${{ secrets.your_repo_github_token }}
-          ref: ${{ needs.init.outputs.base_sha }}
+          token: ${{ inputs.your_repo_github_token}}
+          ref: ${{ inputs.base_sha }}
       - name: Setup node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node_version }}
-      - name: Restore some caches
+      - name: Restore node modules caches
         uses: actions/cache@v4
         with:
-          key: ${{ inputs.cache_key }}
-          path: ${{ inputs.cache_paths }}
-          restore-keys: ${{ inputs.cache_restore_keys }}
-        if: inputs.cache_key
+          key: node_modules_${{ hashFiles('package-lock.json', 'yarn.lock') }}
+          path: node_modules
       - name: Install npm modules on base
-        run: ${{ inputs.install_command }}
+        run: |
+          if [ -f "yarn.lock" ]; then
+            yarn install --frozen-lockfile
+          else
+            npm ci
+          fi
       - name: Take snapshots on base
         run: ${{ inputs.snapshots_command }} --shard ${{ matrix.shard_index }}/${{ matrix.shard_total }}
       - name: Upload base snapshots
@@ -157,9 +139,7 @@ jobs:
       - name: Clone vrt repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.vrt_repo }}
           path: ${{ needs.init.outputs.vrt_diff_workspace }}
-          token: ${{ secrets.vrt_repo_github_token }}
       - name: Download base snapshots
         uses: actions/download-artifact@v4
         with:
@@ -177,13 +157,13 @@ jobs:
           git push origin HEAD:${{ needs.init.outputs.vrt_diff_base_branch }} -f
 
   head:
-    if: ${{ github.event_name == 'pull_request' && !cancelled() && !failure() }}
+    if: ${{ inputs.head_sha != '' && !cancelled() && !failure() }}
     needs: [init, commit_base]
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:${{ inputs.playwright_image_tag }}
     env:
-      GPR_READ_TOKEN: ${{ secrets.env_gpr_read_token }}
+      GPR_READ_TOKEN: ${{ secrets.GPR_READ_TOKEN }}
     strategy:
       matrix:
         shard_index: ${{ fromJson(needs.init.outputs.shard_indexes_json) }}
@@ -196,30 +176,31 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.your_repo }}
-          token: ${{ secrets.your_repo_github_token }}
-          ref: ${{ needs.init.outputs.head_sha }}
+          token: ${{ inputs.your_repo_github_token}}
+          ref: ${{ inputs.head_sha }}
       - name: Clone vrt repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.vrt_repo }}
           ref: ${{ needs.init.outputs.vrt_diff_base_branch }}
           path: ${{ needs.init.outputs.vrt_diff_workspace }}
-          token: ${{ secrets.vrt_repo_github_token }}
       - name: Copy base snapshots from vrt
         run: cp -r ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }} ${{ inputs.snapshots_dirpath }}
       - name: Setup node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node_version }}
-      - name: Restore some caches
+      - name: Restore node modules caches
         uses: actions/cache@v4
         with:
-          key: ${{ inputs.cache_key }}
-          path: ${{ inputs.cache_paths }}
-          restore-keys: ${{ inputs.cache_restore_keys }}
-        if: inputs.cache_key
+          key: node_modules_${{ hashFiles('package-lock.json', 'yarn.lock') }}
+          path: node_modules
       - name: Install npm modules on head
-        run: ${{ inputs.install_command }}
+        run: |
+          if [ -f "yarn.lock" ]; then
+            yarn install --frozen-lockfile
+          else
+            npm ci
+          fi
       - name: Mark timestamp before head snapshot
         run: touch /tmp/.before_snapshot_timestamp
       - name: Take snapshots on head
@@ -241,17 +222,15 @@ jobs:
         if: failure()
 
   commit_head:
-    if: ${{ github.event_name == 'pull_request' && !cancelled() && !failure() }}
+    if: ${{ inputs.head_sha != '' && !cancelled() && !failure() }}
     needs: [init, commit_base, head]
     runs-on: ubuntu-latest
     steps:
       - name: Clone vrt repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.vrt_repo }}
           ref: ${{ needs.init.outputs.vrt_diff_base_branch }}
           path: ${{ needs.init.outputs.vrt_diff_workspace }}
-          token: ${{ secrets.vrt_repo_github_token }}
       - name: Remove existing snapshots directory
         run: rm -rf ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
       - name: Download updated snapshots
@@ -274,48 +253,22 @@ jobs:
             echo "deleted_count=$(git diff HEAD --diff-filter=D --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
             git commit -m "Update screenshots [ci skip]"
             git push origin HEAD:${{ needs.init.outputs.vrt_diff_temp_branch }} -f
-            echo "changed_snapshots_url=https://github.com/${{ inputs.vrt_repo }}/commit/$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+            echo "changed_snapshots_url=https://github.com/${{ github.repository }}/commit/$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           fi
         id: results
-      - name: Create or update comment
-        uses: actions/github-script@v7
+      - name: Push snapshots of head
+        run: |
+          cat <<EOF > /tmp/vrt-result.json
+          {
+            "changedSnapshotUrl": "${{ steps.results.outputs.changed_snapshots_url }}",
+            "addedCount": "${{ steps.results.outputs.added_count }}",
+            "changedCount": "${{ steps.results.outputs.changed_count }}",
+            "deletedCount": "${{ steps.results.outputs.deleted_count }}"
+          }
+          EOF
+      - name: Upload vrt result
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            const subject = "Visual Regression Test Result";
-            const changedSnapshotUrl = '${{ steps.results.outputs.changed_snapshots_url }}';
-            const addedCount = '${{ steps.results.outputs.added_count }}';
-            const changedCount = '${{ steps.results.outputs.changed_count }}';
-            const deletedCount = '${{ steps.results.outputs.deleted_count }}';
-            const result = !changedSnapshotUrl
-              ? "✅ No change"
-              : `❗ Updated: ${changedCount}, Added: ${addedCount}, Deleted: ${deletedCount}`;
-            const commentBody = `### ${subject}\n\n${result}\n${changedSnapshotUrl}`;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const previousComment = comments.find(
-              (comment) =>
-                comment.user.login === "github-actions[bot]" &&
-                comment.body.includes(subject)
-            );
-
-            if (previousComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: previousComment.id,
-                body: commentBody,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: commentBody,
-              });
-            }
-        if: github.event_name == 'pull_request'
+          name: vrt_result
+          path: /tmp/vrt-result.json
+          retention-days: 3
