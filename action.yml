@@ -1,0 +1,129 @@
+name: Composite Action for Visual Regression Test
+
+inputs:
+  your_repo_github_token:
+    description: e.g. secrets.GITHUB_TOKEN
+    type: string
+    required: true
+  vrt_github_app_id:
+    description: e.g. 1234567
+    type: string
+    required: true
+  vrt_github_app_private_key:
+    description: e.g. -----BEGIN RSA PRIVATE KEY----- ...
+    type: string
+    required: true
+  node_version:
+    description: e.g. x.y.z
+    type: string
+    required: true
+  snapshots_command:
+    description: e.g. npm run snapshot
+    type: string
+    required: true
+  snapshots_dirpath:
+    description: e.g. test/vrt.e2e.ts-snapshots
+    type: string
+    required: true
+  your_repo:
+    description: e.g. org_name/repo_name
+    type: string
+    default: ${{ github.repository }}
+  playwright_image_tag:
+    description: e.g. v1.49.1-noble
+    type: string
+    default: latest
+  force_update_base_snapshots:
+    description: e.g. true or false
+    type: boolean
+    default: false
+  shard_count:
+    description: append argument --shard=1/n to the snapshots_command
+    type: number
+    default: 4
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create token for workflow dispatch
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.vrt_github_app_id }}
+        private-key: ${{ inputs.vrt_github_app_private_key }}
+        owner: ${{ github.repository_owner }}
+        repositories: |
+          vrt-workflows-2024
+      id: app_token
+    - name: Setup variables
+      shell: bash
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "base_sha=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
+          echo "head_sha=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+        else
+          echo "base_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "head_sha=" >> $GITHUB_OUTPUT
+        fi
+      id: vars
+    - name: Dispatch workflow without inputs and Wait for result
+      uses: the-actions-org/workflow-dispatch@v4
+      with:
+        workflow: .github/workflows/vrt.yml
+        repo: namikingsoft/vrt-workflows-2024
+        ref: workflow-dispatch-using-github-app
+        token: ${{ steps.app_token.outputs.token }}
+        inputs: >-
+          {
+            "your_repo_github_token": "${{ inputs.your_repo_github_token }}",
+            "node_version": "${{ inputs.node_version }}",
+            "snapshots_command": "${{ inputs.snapshots_command }}",
+            "snapshots_dirpath": "${{ inputs.snapshots_dirpath }}",
+            "your_repo": "${{ github.repository }}",
+            "base_sha": "${{ steps.vars.outputs.base_sha }}",
+            "head_sha": "${{ steps.vars.outputs.head_sha }}",
+            "playwright_image_tag": "${{ inputs.playwright_image_tag }}",
+            "shard_count": "${{ inputs.shard_count }}",
+            "force_update_base_snapshots": "${{ inputs.force_update_base_snapshots }}"
+          }
+    #- name: Create or update comment
+    #  uses: actions/github-script@v7
+    #  with:
+    #    script: |
+    #      const subject = "Visual Regression Test Result";
+    #      const changedSnapshotUrl = '${{ steps.results.outputs.changed_snapshots_url }}';
+    #      const addedCount = '${{ steps.results.outputs.added_count }}';
+    #      const changedCount = '${{ steps.results.outputs.changed_count }}';
+    #      const deletedCount = '${{ steps.results.outputs.deleted_count }}';
+    #      const result = !changedSnapshotUrl
+    #        ? "✅ No change"
+    #        : `❗ Updated: ${changedCount}, Added: ${addedCount}, Deleted: ${deletedCount}`;
+    #      const commentBody = `### ${subject}\n\n${result}\n${changedSnapshotUrl}`;
+
+    #      const { data: comments } = await github.rest.issues.listComments({
+    #        owner: context.repo.owner,
+    #        repo: context.repo.repo,
+    #        issue_number: context.issue.number,
+    #      });
+
+    #      const previousComment = comments.find(
+    #        (comment) =>
+    #          comment.user.login === "github-actions[bot]" &&
+    #          comment.body.includes(subject)
+    #      );
+
+    #      if (previousComment) {
+    #        await github.rest.issues.updateComment({
+    #          owner: context.repo.owner,
+    #          repo: context.repo.repo,
+    #          comment_id: previousComment.id,
+    #          body: commentBody,
+    #        });
+    #      } else {
+    #        await github.rest.issues.createComment({
+    #          owner: context.repo.owner,
+    #          repo: context.repo.repo,
+    #          issue_number: context.issue.number,
+    #          body: commentBody,
+    #        });
+    #      }
+    #  if: github.event_name == 'pull_request'
