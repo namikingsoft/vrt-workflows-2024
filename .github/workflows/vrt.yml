@@ -244,10 +244,9 @@ jobs:
           cd ${{ needs.init.outputs.vrt_diff_workspace }}
           git config user.name  "GitHub Action"
           git config user.email "action@github.com"
-          git add -N ${{ needs.init.outputs.vrt_diff_dirname }}
-          if ! git diff --exit-code --quiet ${{ needs.init.outputs.vrt_diff_dirname }}
+          git add -A ${{ needs.init.outputs.vrt_diff_dirname }}
+          if ! git diff --cached --quiet ${{ needs.init.outputs.vrt_diff_dirname }}
           then
-            git add ${{ needs.init.outputs.vrt_diff_dirname }}
             echo "added_count=$(git diff HEAD --diff-filter=A --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
             echo "changed_count=$(git diff HEAD --diff-filter=M --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
             echo "deleted_count=$(git diff HEAD --diff-filter=D --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
