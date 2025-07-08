@@ -106,30 +106,15 @@ runs:
         repository: ${{ inputs.vrt_repo }}
         github-token: ${{ steps.app_token.outputs.token }}
         run-id: ${{ steps.workflow_dispatch.outputs.workflow-id }}
-    - name: Parse results
-      if: github.event_name == 'pull_request'
-      shell: bash
-      run: |
-        VRT_RESULT_JSON=$(cat /tmp/vrt-result.json)
-        echo "changed_snapshots_url=$(echo "$VRT_RESULT_JSON" | jq -r '.changedSnapshotUrl // ""')" >> $GITHUB_OUTPUT
-        echo "added_count=$(echo "$VRT_RESULT_JSON" | jq -r '.addedCount // "0"')" >> $GITHUB_OUTPUT
-        echo "changed_count=$(echo "$VRT_RESULT_JSON" | jq -r '.changedCount // "0"')" >> $GITHUB_OUTPUT
-        echo "deleted_count=$(echo "$VRT_RESULT_JSON" | jq -r '.deletedCount // "0"')" >> $GITHUB_OUTPUT
-      id: results
     - name: Create or update comment
       if: github.event_name == 'pull_request'
       uses: actions/github-script@v7
       with:
         script: |
+          const fs = require('fs');
           const subject = "Visual Regression Test Result";
-          const changedSnapshotUrl = '${{ steps.results.outputs.changed_snapshots_url }}';
-          const addedCount = '${{ steps.results.outputs.added_count }}';
-          const changedCount = '${{ steps.results.outputs.changed_count }}';
-          const deletedCount = '${{ steps.results.outputs.deleted_count }}';
-          const result = !changedSnapshotUrl
-            ? "✅ No change"
-            : `❗ Updated: ${changedCount}, Added: ${addedCount}, Deleted: ${deletedCount}`;
-          const commentBody = `### ${subject}\n\n${result}\n${changedSnapshotUrl}`;
+          const comment = fs.readFileSync('/tmp/result_comment.md', 'utf8').trim();
+          const commentBody = `## ${subject}\n\n${comment}`;
 
           const { data: comments } = await github.rest.issues.listComments({
             owner: context.repo.owner,

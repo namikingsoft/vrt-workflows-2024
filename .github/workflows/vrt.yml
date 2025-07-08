@@ -224,13 +224,15 @@ jobs:
   commit_head:
     if: ${{ inputs.head_sha != '' && !cancelled() && !failure() }}
     needs: [init, commit_base, head]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Clone vrt repository
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.init.outputs.vrt_diff_base_branch }}
           path: ${{ needs.init.outputs.vrt_diff_workspace }}
+      - name: Copy base snapshots for generate diff images
+        run: cp -r ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }} /tmp/base
       - name: Remove existing snapshots directory
         run: rm -rf ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
       - name: Download updated snapshots
@@ -239,6 +241,8 @@ jobs:
           path: ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
           pattern: updated_snapshots_*
           merge-multiple: true
+      - name: Copy head snapshots for generate diff images
+        run: cp -r ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }} /tmp/head
       - name: Push snapshots of head
         run: |
           cd ${{ needs.init.outputs.vrt_diff_workspace }}
@@ -248,26 +252,194 @@ jobs:
           if ! git diff --cached --quiet ${{ needs.init.outputs.vrt_diff_dirname }}
           then
             echo "added_count=$(git diff HEAD --diff-filter=A --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
-            echo "changed_count=$(git diff HEAD --diff-filter=M --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
+            echo "modified_count=$(git diff HEAD --diff-filter=M --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
             echo "deleted_count=$(git diff HEAD --diff-filter=D --name-only --no-renames | wc -l | xargs)" >> $GITHUB_OUTPUT
+            echo "base_commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
             git commit -m "Update screenshots [ci skip]"
             git push origin HEAD:${{ needs.init.outputs.vrt_diff_temp_branch }} -f
-            echo "changed_snapshots_url=https://github.com/${{ github.repository }}/commit/$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+            echo "head_commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+            echo "head_commit_url=https://github.com/${{ github.repository }}/commit/$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+            git reset --hard HEAD~
           fi
         id: results
-      - name: Push snapshots of head
+      - name: Generate diff images
         run: |
-          cat <<EOF > /tmp/vrt-result.json
-          {
-            "changedSnapshotUrl": "${{ steps.results.outputs.changed_snapshots_url }}",
-            "addedCount": "${{ steps.results.outputs.added_count }}",
-            "changedCount": "${{ steps.results.outputs.changed_count }}",
-            "deletedCount": "${{ steps.results.outputs.deleted_count }}"
-          }
-          EOF
-      - name: Upload vrt result
+          echo "[]" > /tmp/diff_images.json
+          find /tmp/base -type f | while read -r base_file; do
+            relative_path="${base_file#/tmp/base/}"
+            head_file="/tmp/head/${relative_path}"
+            diff_file="/tmp/diff/${relative_path}"
+            
+            if [ -f "$head_file" ]; then
+              mkdir -p "$(dirname "$diff_file")"
+              compare "$base_file" "$head_file" "$diff_file" || [ $? -eq 1 ]
+
+              jq \
+                --arg filepath "$relative_path" \
+                  '. += [{"filepath": $filepath, "compare": "WIP"}]' \
+                < /tmp/diff_images.json \
+                > /tmp/work_diff_images.json
+              mv /tmp/work_diff_images.json /tmp/diff_images.json
+            fi
+          done
+      - name: Generate diff images info
+        if: steps.results.outputs.head_commit_url != ''
+        run: |
+          find /tmp/diff -type f | while read -r diff_file; do
+            relative_path="${diff_file#/tmp/base/}"
+            diff_base64="$(base64 -w 0 "$diff_file")"
+          done
+          cat /tmp/diff_images.json
+      - name: Overwrite diff images
+        if: steps.results.outputs.head_commit_url != ''
+        run: cp -r /tmp/diff/. ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
+      - name: Push snapshots of diff
+        if: steps.results.outputs.head_commit_url != ''
+        run: |
+          cd ${{ needs.init.outputs.vrt_diff_workspace }}
+          git add -A ${{ needs.init.outputs.vrt_diff_dirname }}
+          if ! git diff --cached --quiet ${{ needs.init.outputs.vrt_diff_dirname }}
+          then
+            git commit -m "Update screenshots [ci skip]"
+            git push origin HEAD:${{ needs.init.outputs.vrt_diff_temp_branch }} -f
+            echo "diff_commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          fi
+        id: compare
+      - name: Fetch commit info
+        if: steps.results.outputs.head_commit_url != ''
+        run: |
+          curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/commits/${{ steps.results.outputs.head_commit_sha }}" \
+            > /tmp/head_commit.json
+          cat /tmp/head_commit.json
+      - name: Generate added images info
+        if: steps.results.outputs.head_commit_url != ''
+        run: |
+          jq \
+            '[.files[] | select(.status == "added") | {
+              filepath: (.filename | sub("^diff/"; "")),
+              head_url: .raw_url,
+            }]' \
+            < /tmp/head_commit.json \
+            > /tmp/added_images.json
+          cat /tmp/added_images.json
+      - name: Generate deleted images info
+        if: steps.results.outputs.head_commit_url != ''
+        run: |
+          jq \
+            --arg head_sha "${{ steps.results.outputs.head_commit_sha }}" \
+            --arg base_sha "${{ steps.results.outputs.base_commit_sha }}" \
+            '[.files[] | select(.status == "removed") | {
+              filepath: (.filename | sub("^diff/"; "")),
+              base_url: (.raw_url | gsub($head_sha; $base_sha)),
+            }]' \
+            < /tmp/head_commit.json \
+            > /tmp/deleted_images.json
+          cat /tmp/deleted_images.json
+      - name: Generate modified images info
+        if: steps.results.outputs.head_commit_url != ''
+        run: |
+          jq \
+            --arg head_sha "${{ steps.results.outputs.head_commit_sha }}" \
+            --arg base_sha "${{ steps.results.outputs.base_commit_sha }}" \
+            --arg diff_sha "${{ steps.compare.outputs.diff_commit_sha }}" \
+            --slurpfile diff_images /tmp/diff_images.json \
+            '[.files[] | select(.status == "modified") | {
+              filepath: (.filename | sub("^diff/"; "")),
+              head_url: .raw_url,
+              base_url: (.raw_url | gsub($head_sha; $base_sha)),
+              diff_url: (.raw_url | gsub($head_sha; $diff_sha)),
+            }] | map(
+              . as $item |
+              ($diff_images[0][] | select(.filepath == $item.filepath).compare) as $compare |
+              if $compare then
+                . + {"compare": $compare}
+              else
+                .
+              end
+            )' \
+            < /tmp/head_commit.json \
+            > /tmp/modified_images.json
+          cat /tmp/modified_images.json
+      - name: Generate added content markdown
+        if: steps.results.outputs.head_commit_url != ''
+        run: |
+          exec > /tmp/added_content.md
+          echo "NOTICE: Renamed images are excluded."
+          echo "<table>"
+          jq -r '
+            .[] | 
+            "<tr><td>\(.filepath)</td></tr>\n" +
+            "<tr><td><img alt=\"Added\" src=\"\(.head_url)\"></td></tr>\n"
+          ' < /tmp/added_images.json
+          echo "</table>"
+          echo
+      - name: Generate deleted content markdown
+        if: steps.results.outputs.head_commit_url != ''
+        run: |
+          exec > /tmp/deleted_content.md
+          echo "NOTICE: Renamed images are excluded."
+          echo "<table>"
+          jq -r '
+            .[] | 
+            "<tr><td>\(.filepath)</td></tr>\n" +
+            "<tr><td><img alt=\"Delete\" src=\"\(.base_url)\"></td></tr>\n"
+          ' < /tmp/deleted_images.json
+          echo "</table>"
+          echo
+      - name: Generate modified content markdown
+        if: steps.results.outputs.head_commit_url != ''
+        run: |
+          exec > /tmp/modified_content.md
+          echo "<table>"
+          jq -r '
+            .[] |
+            "<tr><td colspan=\"3\">\(.filepath)</td></tr>\n" +
+            "<tr><td><img width=\"500\" alt=\"Before\" src=\"\(.base_url)\"></td>" +
+            "<td><img width=\"500\" alt=\"After\" src=\"\(.head_url)\"></td>" +
+            "<td><img width=\"500\" alt=\"Diff\" src=\"\(.diff_url)\"></td></tr>\n"
+          ' < /tmp/modified_images.json
+          echo "</table>"
+          echo
+      - name: Generate pull request comment
+        run: |
+          exec > /tmp/result_comment.md
+          commit_url="${{ steps.results.outputs.head_commit_url }}"
+          added_count="${{ steps.results.outputs.added_count }}"
+          modified_count="${{ steps.results.outputs.modified_count }}"
+          deleted_count="${{ steps.results.outputs.deleted_count }}"
+
+          if [ "$commit_url" != "" ]; then
+            echo "$commit_url"
+            echo
+            if [ "$modified_count" -gt 0 ]; then
+              echo "<details><summary>Modified ⚠️ (<strong>${modified_count}</strong>)</summary>"
+              echo
+              cat /tmp/modified_content.md
+              echo
+              echo "</details>"
+            fi
+            if [ "$added_count" -gt 0 ]; then
+              echo "<details><summary>Added ➕ (<strong>${added_count}</strong>)</summary>"
+              echo
+              cat /tmp/added_content.md
+              echo
+              echo "</details>"
+            fi
+            echo
+            if [ "$deleted_count" -gt 0 ]; then
+              echo "<details><summary>Deleted ➖ (<strong>${deleted_count}</strong>)</summary>"
+              echo
+              cat /tmp/deleted_content.md
+              echo
+              echo "</details>"
+            fi
+          else
+            echo "✅ No change"
+          fi
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: vrt_result
-          path: /tmp/vrt-result.json
+          path: /tmp/result_comment.md
           retention-days: 3
