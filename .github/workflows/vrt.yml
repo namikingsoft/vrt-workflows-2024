@@ -262,40 +262,37 @@ jobs:
             git reset --hard HEAD~
           fi
         id: results
+      - name: Fetch commit info
+        if: steps.results.outputs.head_commit_url != ''
+        run: |
+          curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/commits/${{ steps.results.outputs.head_commit_sha }}" \
+            > /tmp/head_commit.json
+          cat /tmp/head_commit.json
+
+          jq \
+            '[.files[] | {
+              filepath: (.filename | sub("^diff/"; "")),
+              status: .status,
+              raw_url: .raw_url,
+            }]' \
+            < /tmp/head_commit.json \
+            > /tmp/head_commit_files.json
+          cat /tmp/head_commit_files.json
       - name: Generate diff images
         run: |
-          echo "[]" > /tmp/diff_images.json
-          find /tmp/base -type f | while read -r base_file; do
-            relative_path="${base_file#/tmp/base/}"
-            head_file="/tmp/head/${relative_path}"
-            diff_file="/tmp/diff/${relative_path}"
-            
-            if [ -f "$head_file" ]; then
+          mkdir -p /tmp/diff
+          jq -r '.[] | select(.status == "modified") | .filepath' < /tmp/head_commit_files.json | while read -r filepath; do
+            base_file="/tmp/base/${filepath}"
+            head_file="/tmp/head/${filepath}"
+            diff_file="/tmp/diff/${filepath}"
               mkdir -p "$(dirname "$diff_file")"
               compare "$base_file" "$head_file" "$diff_file" || [ $? -eq 1 ]
-
-              jq \
-                --arg filepath "$relative_path" \
-                  '. += [{"filepath": $filepath, "compare": "WIP"}]' \
-                < /tmp/diff_images.json \
-                > /tmp/work_diff_images.json
-              mv /tmp/work_diff_images.json /tmp/diff_images.json
-            fi
           done
-      - name: Generate diff images info
-        if: steps.results.outputs.head_commit_url != ''
-        run: |
-          find /tmp/diff -type f | while read -r diff_file; do
-            relative_path="${diff_file#/tmp/base/}"
-            diff_base64="$(base64 -w 0 "$diff_file")"
-          done
-          cat /tmp/diff_images.json
-      - name: Overwrite diff images
-        if: steps.results.outputs.head_commit_url != ''
-        run: cp -r /tmp/diff/. ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
       - name: Push snapshots of diff
         if: steps.results.outputs.head_commit_url != ''
         run: |
+          cp -r /tmp/diff/. ${{ needs.init.outputs.vrt_diff_workspace }}/${{ needs.init.outputs.vrt_diff_dirname }}
           cd ${{ needs.init.outputs.vrt_diff_workspace }}
           git add -A ${{ needs.init.outputs.vrt_diff_dirname }}
           if ! git diff --cached --quiet ${{ needs.init.outputs.vrt_diff_dirname }}
@@ -305,22 +302,15 @@ jobs:
             echo "diff_commit_sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           fi
         id: compare
-      - name: Fetch commit info
-        if: steps.results.outputs.head_commit_url != ''
-        run: |
-          curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/commits/${{ steps.results.outputs.head_commit_sha }}" \
-            > /tmp/head_commit.json
-          cat /tmp/head_commit.json
       - name: Generate added images info
         if: steps.results.outputs.head_commit_url != ''
         run: |
           jq \
-            '[.files[] | select(.status == "added") | {
-              filepath: (.filename | sub("^diff/"; "")),
+            '[.[] | select(.status == "added") | {
+              filepath: .filepath,
               head_url: .raw_url,
             }]' \
-            < /tmp/head_commit.json \
+            < /tmp/head_commit_files.json \
             > /tmp/added_images.json
           cat /tmp/added_images.json
       - name: Generate deleted images info
@@ -329,11 +319,11 @@ jobs:
           jq \
             --arg head_sha "${{ steps.results.outputs.head_commit_sha }}" \
             --arg base_sha "${{ steps.results.outputs.base_commit_sha }}" \
-            '[.files[] | select(.status == "removed") | {
-              filepath: (.filename | sub("^diff/"; "")),
+            '[.[] | select(.status == "removed") | {
+              filepath: .filepath,
               base_url: (.raw_url | gsub($head_sha; $base_sha)),
             }]' \
-            < /tmp/head_commit.json \
+            < /tmp/head_commit_files.json \
             > /tmp/deleted_images.json
           cat /tmp/deleted_images.json
       - name: Generate modified images info
@@ -343,22 +333,13 @@ jobs:
             --arg head_sha "${{ steps.results.outputs.head_commit_sha }}" \
             --arg base_sha "${{ steps.results.outputs.base_commit_sha }}" \
             --arg diff_sha "${{ steps.compare.outputs.diff_commit_sha }}" \
-            --slurpfile diff_images /tmp/diff_images.json \
-            '[.files[] | select(.status == "modified") | {
-              filepath: (.filename | sub("^diff/"; "")),
+            '[.[] | select(.status == "modified") | {
+              filepath: .filepath,
               head_url: .raw_url,
               base_url: (.raw_url | gsub($head_sha; $base_sha)),
               diff_url: (.raw_url | gsub($head_sha; $diff_sha)),
-            }] | map(
-              . as $item |
-              ($diff_images[0][] | select(.filepath == $item.filepath).compare) as $compare |
-              if $compare then
-                . + {"compare": $compare}
-              else
-                .
-              end
-            )' \
-            < /tmp/head_commit.json \
+            }]' \
+            < /tmp/head_commit_files.json \
             > /tmp/modified_images.json
           cat /tmp/modified_images.json
       - name: Generate added content markdown
