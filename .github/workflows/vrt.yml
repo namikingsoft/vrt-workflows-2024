@@ -286,8 +286,8 @@ jobs:
             base_file="/tmp/base/${filepath}"
             head_file="/tmp/head/${filepath}"
             diff_file="/tmp/diff/${filepath}"
-              mkdir -p "$(dirname "$diff_file")"
-              compare "$base_file" "$head_file" "$diff_file" || [ $? -eq 1 ]
+            mkdir -p "$(dirname "$diff_file")"
+            compare "$base_file" "$head_file" "$diff_file" || [ $? -eq 1 ]
           done
       - name: Push snapshots of diff
         if: steps.results.outputs.head_commit_url != ''
@@ -418,9 +418,25 @@ jobs:
           else
             echo "✅ No change"
           fi
+      - name: Generate modified images
+        run: |
+          mkdir -p /tmp/modified_images
+          cp -r /tmp/diff /tmp/modified_images/
+          jq -r '.[].filepath' < /tmp/modified_images.json | while read -r filepath; do
+            base_file="/tmp/base/${filepath}"
+            head_file="/tmp/head/${filepath}"
+            before_file="/tmp/modified_images/before/${filepath}"
+            after_file="/tmp/modified_images/after/${filepath}"
+            mkdir -p "$(dirname "$before_file")"
+            mkdir -p "$(dirname "$after_file")"
+            cp "$base_file" "$before_file"
+            cp "$head_file" "$after_file"
+          done
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: vrt_result
-          path: /tmp/result_comment.md
+          path: |
+            /tmp/result_comment.md
+            /tmp/modified_images
           retention-days: 3
