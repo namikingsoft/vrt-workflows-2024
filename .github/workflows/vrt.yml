@@ -376,9 +376,9 @@ jobs:
           jq -r '
             .[] |
             "<tr><td colspan=\"3\">\(.filepath)</td></tr>\n" +
-            "<tr><td><img width=\"500\" alt=\"Before\" src=\"\(.base_url)\"></td>" +
-            "<td><img width=\"500\" alt=\"After\" src=\"\(.head_url)\"></td>" +
-            "<td><img width=\"500\" alt=\"Diff\" src=\"\(.diff_url)\"></td></tr>\n"
+            "<tr><td valign=\"top\"><img width=\"500\" alt=\"Before\" src=\"\(.base_url)\"></td>" +
+            "<td valign=\"top\"><img width=\"500\" alt=\"After\" src=\"\(.head_url)\"></td>" +
+            "<td valign=\"top\"><img width=\"500\" alt=\"Diff\" src=\"\(.diff_url)\"></td></tr>\n"
           ' < /tmp/modified_images.json
           echo "</table>"
           echo
