@@ -439,4 +439,5 @@ jobs:
           path: |
             /tmp/result_comment.md
             /tmp/modified_images
-          retention-days: 3
+          # Set a longer value for later use in the review workflow
+          retention-days: 30
