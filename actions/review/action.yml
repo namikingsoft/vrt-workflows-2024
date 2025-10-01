@@ -1,0 +1,186 @@
+name: Composite Action for Visual Regression Test Review with modified
+
+inputs:
+  vrt_github_app_id:
+    description: e.g. 1234567
+    type: string
+    required: true
+  vrt_github_app_private_key:
+    description: e.g. -----BEGIN RSA PRIVATE KEY----- ...
+    type: string
+    required: true
+  vrt_repo:
+    description: e.g. namikingsoft/vrt-workflows-2024
+    type: string
+    required: true
+  your_repo:
+    description: e.g. github.repository
+    type: string
+    default: ${{ github.repository }}
+  your_repo_pull_request_number:
+    description: e.g. github.event.pull_request.number
+    type: number
+    required: true
+  your_repo_github_token:
+    description: e.g. secrets.GITHUB_TOKEN
+    type: string
+    required: true
+  anthropic_api_key:
+    description: e.g. secrets.ANTHROPIC_API_KEY
+    type: string
+    required: true
+  additional_prompt:
+    description: e.g. "* Japanese, please.\n* Do something."
+    type: string
+    default: Nothing.
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup variables
+      shell: bash
+      run: |
+        IFS='/' read -r owner repo <<< "${{ inputs.vrt_repo }}"
+        echo "vrt_owner=${owner}" >> $GITHUB_OUTPUT
+        echo "vrt_repositories=${repo}" >> $GITHUB_OUTPUT
+        IFS='/' read -r owner repo <<< "${{ inputs.your_repo }}"
+        echo "your_owner=${owner}" >> $GITHUB_OUTPUT
+        echo "your_repositories=${repo}" >> $GITHUB_OUTPUT
+      id: vars
+    - name: Extract VRT workflow id from result comment
+      uses: actions/github-script@v7
+      env:
+        OWNER: ${{ steps.vars.outputs.your_owner }}
+        REPO: ${{ steps.vars.outputs.your_repositories }}
+        ISSUE_NUMBER: ${{ inputs.your_repo_pull_request_number }}
+      with:
+        script: |
+          const metaIdentity = 'Identity: Visual Regression Test Result';
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          const previousComment = comments.find(
+            (comment) =>
+              comment.user.login === "github-actions[bot]" &&
+              comment.body.includes(metaIdentity)
+          );
+          if (previousComment?.body?.includes('<summary>Modified')) {
+            const matches = previousComment.body.match(/workflowId:\s*(\d+)/);
+            if (matches) return Number(matches[1]);
+          }
+      id: comment
+    - name: Check review necessity
+      shell: bash
+      run: |
+        echo "workflowId: ${{ steps.comment.outputs.result }}"
+        if [ "${{ steps.comment.outputs.result }}" = "" ]; then
+          echo "Moditied VRT result not found."
+          exit 0
+        fi
+    - name: Create token for workflow dispatch
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.vrt_github_app_id }}
+        private-key: ${{ inputs.vrt_github_app_private_key }}
+        owner: ${{ steps.vars.outputs.vrt_owner }}
+        repositories: ${{ steps.vars.outputs.vrt_repositories }}
+      id: app_token
+    - name: Download results
+      uses: actions/download-artifact@v4
+      with:
+        name: vrt_result
+        path: /tmp/vrt
+        repository: ${{ inputs.vrt_repo }}
+        github-token: ${{ steps.app_token.outputs.token }}
+        run-id: ${{ steps.comment.outputs.result }}
+    - name: Clone your repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.your_repo }}
+        token: ${{ inputs.your_repo_github_token}}
+        ref: refs/pull/${{ inputs.your_repo_pull_request_number }}/head
+        path: __for_vrt__
+    - name: Move repository
+      shell: bash
+      run: mv __for_vrt__ /tmp/vrt/repo
+    - name: Install claude code
+      shell: bash
+      run: npm i -g @anthropic-ai/claude-code
+    - name: Download something from github
+      shell: bash
+      run: |
+        export GH_TOKEN="${{ inputs.your_repo_github_token }}"
+        cd /tmp/vrt/repo
+        gh pr view ${{ github.event.pull_request.number }} > /tmp/vrt/pr_view.txt
+        gh pr diff ${{ github.event.pull_request.number }} > /tmp/vrt/pr_diff.txt
+    - name: Setup claude code
+      shell: bash
+      run: |
+        mkdir -p ~/.claude
+        jq -n '{
+          permissions: {
+            additionalDirectories: ["/tmp/vrt"],
+          },
+        }' > ~/.claude/settings.json
+    - name: Review visual regression test results
+      shell: bash
+      run: |
+        export ANTHROPIC_API_KEY="${{ inputs.anthropic_api_key }}"
+        cp "${{ github.action_path }}/prompt.md" /tmp/prompt.md
+        echo "\n${{ inputs.additional_prompt }}" >> /tmp/prompt.md
+        claude -p --verbose --output-format stream-json < /tmp/prompt.md \
+          | tee /tmp/vrt/review_progress.jsonl \
+          | jq
+        jq -r 'select(.type == "result") | .result' \
+          < /tmp/vrt/review_progress.jsonl \
+          > /tmp/vrt/review_comment.md
+        if [ "$(cat /tmp/vrt/review_comment.md)" = "null" ]; then
+          echo "Review comment is empty."
+          exit 1
+        fi
+    - name: Create or update review comment
+      uses: actions/github-script@v7
+      env:
+        OWNER: ${{ steps.vars.outputs.your_owner }}
+        REPO: ${{ steps.vars.outputs.your_repositories }}
+        ISSUE_NUMBER: ${{ inputs.your_repo_pull_request_number }}
+      with:
+        github-token: ${{ inputs.your_repo_github_token }}
+        script: |
+          const fs = require('fs');
+          const review = fs.readFileSync('/tmp/vrt/review_comment.md', 'utf8').trim();
+          const meta = "<!--\nTitle: Visual Regression Test Review\n\-->";
+          const body = `${review}\n\n${meta}\n`;
+          const owner = process.env.OWNER;
+          const repo = process.env.REPO;
+          const issue_number = process.env.ISSUE_NUMBER;
+
+          const { data: comments } = await github.rest.issues.listComments({
+            owner,
+            repo,
+            issue_number,
+          });
+
+          const previousComment = comments.find(
+            (comment) =>
+              comment.user.login === "github-actions[bot]" &&
+              comment.body.includes(meta)
+          );
+
+          if (previousComment) {
+            await github.rest.issues.updateComment({
+              owner,
+              repo,
+              comment_id: previousComment.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body,
+            });
+          }
