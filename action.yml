@@ -82,7 +82,7 @@ runs:
         repo: ${{ inputs.vrt_repo }}
         ref: ${{ inputs.vrt_repo_ref }}
         token: ${{ steps.app_token.outputs.token }}
-        wait-for-completion-interval: 10s
+        wait-for-completion-interval: 3s
         inputs: >-
           {
             "your_repo_github_token": "${{ inputs.your_repo_github_token }}",
