@@ -116,15 +116,8 @@ runs:
               }
             `);
           }
-    - name: Check review necessity
-      shell: bash
-      run: |
-        echo "workflowId: ${{ steps.comment.outputs.result }}"
-        if [ "${{ steps.comment.outputs.result }}" = "" ]; then
-          echo "Moditied VRT result not found."
-          exit 0
-        fi
     - name: Create token for workflow dispatch
+      if: steps.comment.outputs.result != ''
       uses: actions/create-github-app-token@v2
       with:
         app-id: ${{ inputs.vrt_github_app_id }}
@@ -133,6 +126,7 @@ runs:
         repositories: ${{ steps.vars.outputs.vrt_repositories }}
       id: app_token
     - name: Download results
+      if: steps.comment.outputs.result != ''
       uses: actions/download-artifact@v4
       with:
         name: vrt_result
@@ -141,6 +135,7 @@ runs:
         github-token: ${{ steps.app_token.outputs.token }}
         run-id: ${{ steps.comment.outputs.result }}
     - name: Clone your repository
+      if: steps.comment.outputs.result != ''
       uses: actions/checkout@v4
       with:
         repository: ${{ inputs.your_repo }}
@@ -148,12 +143,15 @@ runs:
         ref: refs/pull/${{ inputs.your_repo_pull_request_number }}/head
         path: __for_vrt__
     - name: Move repository
+      if: steps.comment.outputs.result != ''
       shell: bash
       run: mv __for_vrt__ /tmp/vrt/repo
     - name: Install claude code
+      if: steps.comment.outputs.result != ''
       shell: bash
       run: npm i -g @anthropic-ai/claude-code
     - name: Download something from github
+      if: steps.comment.outputs.result != ''
       shell: bash
       run: |
         export GH_TOKEN="${{ inputs.your_repo_github_token }}"
@@ -161,6 +159,7 @@ runs:
         gh pr view ${{ inputs.your_repo_pull_request_number }} > /tmp/vrt/pr_view.txt
         gh pr diff ${{ inputs.your_repo_pull_request_number }} > /tmp/vrt/pr_diff.txt
     - name: Setup claude code
+      if: steps.comment.outputs.result != ''
       shell: bash
       run: |
         mkdir -p ~/.claude
@@ -170,6 +169,7 @@ runs:
           },
         }' > ~/.claude/settings.json
     - name: Review visual regression test results
+      if: steps.comment.outputs.result != ''
       shell: bash
       run: |
         export ANTHROPIC_API_KEY="${{ inputs.anthropic_api_key }}"
@@ -186,6 +186,7 @@ runs:
           exit 1
         fi
     - name: Create or update review comment
+      if: steps.comment.outputs.result != ''
       uses: actions/github-script@v7
       env:
         OWNER: ${{ steps.vars.outputs.your_owner }}
