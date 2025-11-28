@@ -3,18 +3,21 @@
 Please examine the possibility of degradation with reference to the Visual Regression Test results.
 
 - Compare the pull request with the VRT result.
-- Review the recognized before-and-after comparison images (/tmp/vrt/modified_images) created by VRT.
+- Review the recognized all before-and-after comparison images (/tmp/vrt/modified_images) created by VRT.
 
 ## Expected output
 
 Output in Markdown format with the following headings.
 
-1. Degradation possibility
+1. Possibility Degradation
 1. Pickup of diff images
-1. Correlation Analysis with the Pull Request
+1. Possibility of non-deterministic rendering
 1. Concerns
 
-### Degradation Possibility
+Set the top-level heading (h1) to “Visual Regression Test Analysis”.
+Do not place any text above the top-level heading. Start directly with the heading.
+
+### Possibility Degradation
 
 Output icon and the degradation possibility assessment.
 
@@ -42,6 +45,7 @@ Use this scale to determine degradation possibility:
 🟡 30-69%:
 
 - Moderate changes that may affect usability or appearance
+- Visual changes that do not match the title or content of the Pull Request
 
 🟢 0-29%:
 
@@ -58,42 +62,79 @@ Consider these factors:
 
 ### Pickup of diff images
 
-Copy and paste the before-and-after image comparison table in the VRT results comments, leaving only one row and explain.
+Copy and paste the before-and-after image comparison table rows from the VRT results comments, selecting exactly one most impactful image from each causal relationship category (up to 3 categories maximum) with the pull request diff.
+
+Selection criteria:
+
+- Select exactly one representative image from each causality category
+- Choose the most impactful example within each category
+- Prioritize SP (smartphone) layout differences when available
+- Analyze all images to determine their causal relationship before selection
+- Maximum 3 causality categories to maintain readability
 
 Note:
 
-- Copy and paste the row likely to have the greatest impact.
-- Do not modify the contents of the original table.
+- Copy and paste one row from each causality category that exists
+- Keep the correct HTML markup for the table
+- If copying only tr tags without table structure, wrap them in proper table tags
+- Do not modify the contents of the original table rows
+- Provide brief explanation for each selected image focusing on the causal relationship
 
-### Correlation Analysis with the Pull Request
+Output format:
 
-To clarify potential false detections, analyze causality based on the repository source code, the Pull Request, and the VRT results.
+```
+### {Causality category title 1}
 
-1. Check the relationship between detected visual changes and the Pull Request diff (/tmp/vrt/pr_diff.txt)
-2. Reference the repository source code (/tmp/vrt/repo) to examine causal relationship with modified images
-3. Determine if the visual differences are:
-   - Expected results of the code changes
-   - Potential degradation not intended by the Pull Request
-   - False positives completely unrelated to the Pull Request diff
-4. Provide reasoning for your assessment based on code analysis
+{Casuality category description 2}
 
-False Positives Guidelines:
+<table>
+{Copy and paste the before-and-after image comparison table row, selecting exactly one most impactful image}
+</table>
+```
 
-- Visual changes unrelated to the Pull Request diff
-  e.g. changes in completely unrelated components
-  e.g. changes limited to type definitions, tests, or documentation
+### Possibility of non-deterministic rendering
+
+For each diff image in the VRT Result comment (/tmp/vrt/result_comment.md), verify the possibility of non-deterministic rendering based on the causal relationship with the Pull Request diff (/tmp/vrt/pr_diff.txt) and the repository source (/tmp/vrt/repo).
+
+Guidelines for non-deterministic rendering:
+
+- Visual changes unrelated to the pull request diff
+  Example: Changes to completely unrelated components
+  Example: Changes limited to type definitions, tests, or documentation
 - Minor anti-aliasing
-- Animation
+- Animations
 - Rendering delays
-- Dynamic content variations (timestamps, user-specific data, random content)
+- Fluctuations in dynamic content (timestamps, user-specific data, random content)
+
+Based on the verified information, Derive the following points for each diff image:
+
+- Percentage: of non-deterministic rendering
+- Concise reason: Summary of image diff and reason for judging it as non-deterministic rendering
+- Before image path: Copy and paste from vrt result (/tmp/vrt/result_comment.md)
+
+Output format:
+
+{Listed image differences exceeding 50%. | No image differences with high possibility were found.}
+
+| Image                                         | %             | Reason           |
+| --------------------------------------------- | ------------- | ---------------- |
+| <img src="{Before image path}" width="100" /> | {Percentage}% | {Concise reason} |
+| <img src="{Before image path}" width="100" /> | {Percentage}% | {Concise reason} |
+
+<!-- non-deterministic rendering detected: {yes or no} -->
+
+<details>
+<summary>Detailed rationale</summary>
+
+{Clearly and comprehensively explain the basis for your determination of causality.}
+
+</details>
 
 ### Concerns
 
 List specific issues that require attention. Format each concern with priority, description, and recommended action.
 
-Format:
-
-- **[Priority]** Description - Recommended action
+But, Ignore concern not checked on the pull request comment checklist. This is because we do not perform checks as part of our workflow.
 
 Priority levels:
 
@@ -108,12 +149,16 @@ Types of concerns:
 - Layout/alignment issues impacting usability
 - Accessibility problems (contrast, readability)
 - Unintended side effects from code changes
+- Unintended visual changes that don't match PR title and comment scope
 
-Example:
+Output format:
 
-- **[Critical]** Login button disappeared on mobile - Fix responsive CSS before merge
-- **[High]** Text color contrast too low - Update theme colors
-- **[Medium]** Minor spacing difference in footer - Consider design review
+| Priority    | Description                                                                           |
+| ----------- | ------------------------------------------------------------------------------------- |
+| 🔥 Critical | Login button disappeared on mobile - Fix responsive CSS before merge                  |
+| 🔴 High     | Unintended visual changes that don't match PR title and comment scope - Review impact |
+| 🟡 Midium   | Text color contrast too low - Update theme colors                                     |
+| 🟢 Low      | Minor spacing difference in footer - Consider design review                           |
 
 If no concerns are found, state: "No significant concerns identified."
 
@@ -130,7 +175,9 @@ If no concerns are found, state: "No significant concerns identified."
 ## Notice to AI
 
 1. Do not use your todo tools for stability.
-1. If a language change request is made, also translate headings and labels.
+1. Strictly follow all notes outlined in this prompt without exception.
+1. If a language change request is made, also translate all headings and labels.
    - e.g. Pickup of diff images, Critical, Medium Risk, False positives, ...
+1. However, keep the content within comments <!-- e.g. text --> in English.
 
 ## Additional Requests
