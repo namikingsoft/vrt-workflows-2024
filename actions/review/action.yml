@@ -75,6 +75,47 @@ runs:
             if (matches) return Number(matches[1]);
           }
       id: comment
+    - name: Minimize comment if not modified
+      if: steps.comment.outputs.result == ''
+      uses: actions/github-script@v7
+      env:
+        OWNER: ${{ steps.vars.outputs.your_owner }}
+        REPO: ${{ steps.vars.outputs.your_repositories }}
+        ISSUE_NUMBER: ${{ inputs.your_repo_pull_request_number }}
+      with:
+        github-token: ${{ inputs.your_repo_github_token }}
+        script: |
+          const meta = "<!--\nTitle: Visual Regression Test Review\n\-->";
+          const owner = process.env.OWNER;
+          const repo = process.env.REPO;
+          const issue_number = process.env.ISSUE_NUMBER;
+
+          const { data: comments } = await github.rest.issues.listComments({
+            owner,
+            repo,
+            issue_number,
+          });
+
+          const previousComment = comments.find(
+            (comment) =>
+              comment.user.login === "github-actions[bot]" &&
+              comment.body.includes(meta)
+          );
+
+          if (previousComment) {
+            await github.graphql(`
+              mutation {
+                minimizeComment(input: {
+                  subjectId: "${previousComment.node_id}"
+                  classifier: OUTDATED
+                }) {
+                  minimizedComment {
+                    isMinimized
+                  }
+                }
+              }
+            `);
+          }
     - name: Check review necessity
       shell: bash
       run: |
@@ -174,6 +215,17 @@ runs:
           );
 
           if (previousComment) {
+            await github.graphql(`
+              mutation {
+                unminimizeComment(input: {
+                  subjectId: "${previousComment.node_id}"
+                }) {
+                  unminimizedComment {
+                    isMinimized
+                  }
+                }
+              }
+            `);
             await github.rest.issues.updateComment({
               owner,
               repo,
