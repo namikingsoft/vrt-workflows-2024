@@ -19,7 +19,7 @@ Do not place any text above the top-level heading. Start directly with the headi
 
 ### Possibility Degradation
 
-Output icon and the degradation possibility assessment.
+Output icon and a degradation possibility assessment.
 
 Explain the reason concisely.
 
@@ -106,7 +106,7 @@ Guidelines for non-deterministic rendering:
 - Rendering delays
 - Fluctuations in dynamic content (timestamps, user-specific data, random content)
 
-Based on the verified information, Derive the following points for each diff image:
+Based on the verified information, derive the following points for each diff image:
 
 - Percentage: of non-deterministic rendering
 - Concise reason: Summary of image diff and reason for judging it as non-deterministic rendering
@@ -157,7 +157,7 @@ Output format:
 | ----------- | ------------------------------------------------------------------------------------- |
 | 🔥 Critical | Login button disappeared on mobile - Fix responsive CSS before merge                  |
 | 🔴 High     | Unintended visual changes that don't match PR title and comment scope - Review impact |
-| 🟡 Midium   | Text color contrast too low - Update theme colors                                     |
+| 🟡 Medium   | Text color contrast too low - Update theme colors                                     |
 | 🟢 Low      | Minor spacing difference in footer - Consider design review                           |
 
 If no concerns are found, state: "No significant concerns identified."
